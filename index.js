@@ -200,14 +200,14 @@ async function procesarMensaje(telefono, mensaje) {
       return;
     }
     sesiones[telefono] = { paso: 'pedir_monto_pago', datos: {} };
-    await enviarMensaje(telefono, `💰 *REGISTRAR PAGO*\n\n¿Cuánto vas a pagar? (solo el número, ejemplo: 250) no olvides adjuntar tu comprobante y colocar tu ID unico en la referencia ☺️👍`);
+    await enviarMensaje(telefono, `💰 *REGISTRAR PAGO*\n\n¿Cuánto vas a pagar? (solo el número, ejemplo: 250)`);
     return;
   }
 
   if (sesion.paso === 'pedir_monto_pago') {
     const monto = parseFloat(texto);
     if (isNaN(monto) || monto <= 0) {
-      await enviarMensaje(telefono, `❌ Escribe solo el número. Ejemplo: 200`);
+      await enviarMensaje(telefono, `❌ Escribe solo el número. Ejemplo: 250`) no olvides adjuntar tu comprobante y colocar tu ID unico en la referencia ☺️👍;
       return;
     }
     const idx = db.usuarios.findIndex(u => u.telefono === telefono);
@@ -322,4 +322,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Bot corriendo en puerto ${PORT}`);
 });
-
