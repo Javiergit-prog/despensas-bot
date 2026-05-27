@@ -157,7 +157,7 @@ async function procesarMensaje(telefono, mensaje) {
     await new Promise(r => setTimeout(r, 1500));
 
     await enviarMensaje(telefono,
-      `📋 *SIGUIENTE PASO IMPORTANTE*\n\nPreséntate con el administrador para recoger tu *credencial física* con tu código de usuario.\n\nSin ella no podrás recoger tu despensa mensual. 🌽`
+      `📋 *SIGUIENTE PASO IMPORTANTE*\n\nPreséntate con el administrador para recoger tu *credencial física* con tu código de usuario.\n\nSin ella no podrás recoger tu despensa mensual. 🎁😀 !!*en caso de no hacrlo en un plazo maximo de 20 dias tu ID de usuario sera reasignado*¡¡😞`
     );
 
     await enviarMensaje(ADMIN_PHONE,
@@ -200,7 +200,7 @@ async function procesarMensaje(telefono, mensaje) {
       return;
     }
     sesiones[telefono] = { paso: 'pedir_monto_pago', datos: {} };
-    await enviarMensaje(telefono, `💰 *REGISTRAR PAGO*\n\n¿Cuánto vas a pagar? (solo el número, ejemplo: 200)`);
+    await enviarMensaje(telefono, `💰 *REGISTRAR PAGO*\n\n¿Cuánto vas a pagar? (solo el número, ejemplo: 250) no olvides adjuntar tu comprobante y colocar tu ID unico en la referencia ☺️👍`);
     return;
   }
 
