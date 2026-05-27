@@ -64,7 +64,7 @@ async function enviarMensaje(telefono, mensaje) {
 // MENÚ PRINCIPAL
 // ============================================================
 function menuPrincipal() {
-  return `🌽 *BIENVENIDO A DESPENSAS*
+  return `🛒 *¡BIENVENIDO A TU RED DE DESPENSAS!*
 
 ¿Qué deseas hacer?
 
@@ -95,7 +95,9 @@ async function procesarMensaje(telefono, mensaje) {
       return;
     }
     sesiones[telefono] = { paso: 'pedir_nombre', datos: {} };
-    await enviarMensaje(telefono, `✏️ *REGISTRO DE NUEVO USUARIO*\n\n¿Cuál es tu nombre completo? por favor escribelo tal como aparece en tu Identificacion INE`);
+    await enviarMensaje(telefono, `✏️ *REGISTRO DE NUEVO USUARIO*\n\n¿Cuál es tu nombre completo?
+
+📋 Por favor escríbelo *tal como aparece en tu identificación INE*`);
     return;
   }
 
@@ -157,7 +159,7 @@ async function procesarMensaje(telefono, mensaje) {
     await new Promise(r => setTimeout(r, 1500));
 
     await enviarMensaje(telefono,
-      `📋 *SIGUIENTE PASO IMPORTANTE*\n\nPreséntate con el administrador para recoger tu *credencial física* con tu código de usuario.\n\nSin ella no podrás recoger tu despensa mensual. 🎁😀 !!*en caso de no hacrlo en un plazo maximo de 20 dias tu ID de usuario sera reasignado*¡¡😞`
+      `📋 *SIGUIENTE PASO IMPORTANTE*\n\nPreséntate con el administrador para recoger tu *credencial física* con tu código de usuario.\n\nSin ella no podrás recoger tu despensa mensual. 📦📆`
     );
 
     await enviarMensaje(ADMIN_PHONE,
@@ -188,7 +190,7 @@ async function procesarMensaje(telefono, mensaje) {
     const u = usuarioExistente;
     const restantes = 4 - u.referidos.length;
     await enviarMensaje(telefono,
-      `👥 *INVITAR REFERIDOS*\n\nTu código para invitar es:\n*${u.id}*\n\nComparte este mensaje:\n\n———————————————\n🌽 Te invito a unirte a la red de despensas.\nEscribe *HOLA* al número del negocio y cuando te pida código de referido pon:\n*${u.id}*\n———————————————\n\nTienes *${u.referidos.length}/4* referidos.\nTe faltan *${restantes}* lugares.`
+      `👥 *INVITAR REFERIDOS*\n\nTu código para invitar es:\n*${u.id}*\n\nComparte este mensaje:\n\n———————————————\n😀 Te invito a unirte a la red de despensas.\nEscribe *HOLA* al número del negocio y cuando te pida código de referido pon:\n*${u.id}*\n———————————————\n\nTienes *${u.referidos.length}/4* referidos.\nTe faltan *${restantes}* lugares.`
     );
     return;
   }
@@ -200,7 +202,13 @@ async function procesarMensaje(telefono, mensaje) {
       return;
     }
     sesiones[telefono] = { paso: 'pedir_monto_pago', datos: {} };
-    await enviarMensaje(telefono, `💰 *REGISTRAR PAGO*\n\n¿Cuánto vas a pagar? (solo el número, ejemplo: 200)`);
+    await enviarMensaje(telefono, `💰 *REGISTRAR PAGO*
+
+¿Cuánto vas a pagar? (solo el número, ejemplo: *250*)
+
+📎 *IMPORTANTE:*
+1️⃣ Adjunta el *comprobante de tu pago* en este chat
+2️⃣ En la referencia de tu transferencia no olvides colocar tu *número de ID de registro* (ejemplo: DESP-000001)`);
     return;
   }
 
@@ -311,7 +319,11 @@ app.post('/webhook', async (req, res) => {
   if (telefono.includes('@g.us')) return; // ignorar grupos
 
   console.log(`📩 Mensaje de ${telefono}: ${mensaje}`);
-  await procesarMensaje(telefono, mensaje);
+  try {
+    await procesarMensaje(telefono, mensaje);
+  } catch (err) {
+    console.error(`❌ Error procesando mensaje de ${telefono}:`, err.message);
+  }
 });
 
 app.get('/', (req, res) => {
