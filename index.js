@@ -95,7 +95,7 @@ async function procesarMensaje(telefono, mensaje) {
       return;
     }
     sesiones[telefono] = { paso: 'pedir_nombre', datos: {} };
-    await enviarMensaje(telefono, `✏️ *REGISTRO DE NUEVO USUARIO*\n\n¿Cuál es tu nombre completo?`);
+    await enviarMensaje(telefono, `✏️ *REGISTRO DE NUEVO USUARIO*\n\n¿Cuál es tu nombre completo? por favor escribelo tal como aparece en tu Identificacion INE`);
     return;
   }
 
