@@ -115,8 +115,8 @@ async function enviarCredencial(telefono, usuario) {
 
     await new Promise(r => setTimeout(r, 1500));
 
-    const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(usuario.id);
-    await enviarImagen(telefono, qrUrl, 'Codigo QR de tu credencial: ' + usuario.id);
+    var qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(usuario.id);
+    await enviarMensaje(telefono, 'Codigo QR de tu credencial ' + usuario.id + ':\n\n' + qrUrl + '\n\nAbre el enlace y guarda la imagen del QR.');
 
     console.log('Credencial enviada a', telefono);
   } catch (err) {
