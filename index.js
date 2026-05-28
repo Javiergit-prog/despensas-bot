@@ -130,7 +130,7 @@ async function enviarCredencial(telefono, usuario) {
 function menuPrincipal() {
   return '🛒 *BIENVENIDO A DESPENSACLUB FAMILIAR*\n' +
     '━━━━━━━━━━━━━━━━━━━━\n' +
-    '☺️👍 *Despensas familiares mensuales*\n' +
+    '🥫🧃🍚 *Despensas familiares mensuales*\n' +
     '━━━━━━━━━━━━━━━━━━━━\n\n' +
     'Que deseas hacer?\n\n' +
     '1️⃣ Registrarme como nuevo usuario\n' +
@@ -151,6 +151,33 @@ async function procesarMensaje(telefono, mensaje) {
     const sesion = sesiones[telefono] || { paso: 'menu' };
     const usuarioExistente = db.usuarios.find(function(u) { return u.telefono === telefono; });
     const telLimpio = String(telefono).replace('@s.whatsapp.net', '').replace('@c.us', '');
+
+    // ── COMANDO ADMIN RAPIDO (funciona desde cualquier paso)
+    if (texto === 'RESETBD' && String(telefono).includes('5576683884')) {
+      guardarDB({ usuarios: [], contador: 0 });
+      Object.keys(sesiones).forEach(k => delete sesiones[k]);
+      await enviarMensaje(telefono, 'Base de datos limpiada correctamente. Todos los usuarios de prueba eliminados.');
+      return;
+    }
+
+    if (texto === 'REPORTE' && String(telefono).includes('5576683884')) {
+      const db2 = cargarDB();
+      const total = db2.usuarios.length;
+      const activos = db2.usuarios.filter(function(u) { return u.activo; }).length;
+      const conPago = db2.usuarios.filter(function(u) { return u.pagos.some(function(p) { return p.estado === 'confirmado'; }); }).length;
+      await enviarMensaje(telefono, 'REPORTE GENERAL\n\nTotal: ' + total + '\nActivos: ' + activos + '\nCon pago: ' + conPago + '\nSin pago: ' + (total - conPago));
+      return;
+    }
+
+    if (texto === 'LISTA' && String(telefono).includes('5576683884')) {
+      const db2 = cargarDB();
+      if (db2.usuarios.length === 0) { await enviarMensaje(telefono, 'No hay usuarios.'); return; }
+      const lista = db2.usuarios.slice(-10).map(function(u) {
+        return (u.activo ? 'OK' : 'XX') + ' ' + u.id + ' ' + u.nombre + ' Nv.' + (u.nivel||0);
+      }).join('\n');
+      await enviarMensaje(telefono, 'ULTIMOS 10 USUARIOS\n\n' + lista + '\n\nTotal: ' + db2.usuarios.length);
+      return;
+    }
 
     // ── REGISTRO PASO 1
     if (sesion.paso === 'menu' && texto === '1') {
@@ -364,7 +391,11 @@ async function procesarMensaje(telefono, mensaje) {
     }
 
     // ── COMANDOS ADMIN
-    const esAdmin = (telefono === ADMIN_PHONE || telLimpio === '5576683884' || String(telefono).includes('5576683884'));
+    const esAdmin = (
+      String(telefono).includes('5576683884') ||
+      String(telLimpio).includes('5576683884') ||
+      telefono === ADMIN_PHONE
+    );
 
     if (esAdmin) {
 
