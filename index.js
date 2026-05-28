@@ -12,7 +12,7 @@ app.use(express.urlencoded({ extended: true }));
 // ============================================================
 const WASENDER_TOKEN = process.env.WASENDER_TOKEN || '3b7473e48f999ed47678f31fb456aa20550a8bbf344e621d80481755dc0a2bc6';
 const WASENDER_URL = 'https://api.wasenderapi.com/api/send-message';
-const ADMIN_PHONE = process.env.ADMIN_PHONE || '5215576683884';
+const ADMIN_PHONE = process.env.ADMIN_PHONE || '525576683884';
 
 const COLORES_NIVEL = {
   0: 'VIOLETA', 1: 'DORADO', 2: 'AZUL',
@@ -130,7 +130,7 @@ async function enviarCredencial(telefono, usuario) {
 function menuPrincipal() {
   return '🛒 *BIENVENIDO A DESPENSACLUB FAMILIAR*\n' +
     '━━━━━━━━━━━━━━━━━━━━\n' +
-    '🥫🧃🍚 *Despensas familiares mensuales*\n' +
+    '☺️👍 *Despensas familiares mensuales*\n' +
     '━━━━━━━━━━━━━━━━━━━━\n\n' +
     'Que deseas hacer?\n\n' +
     '1️⃣ Registrarme como nuevo usuario\n' +
@@ -364,7 +364,7 @@ async function procesarMensaje(telefono, mensaje) {
     }
 
     // ── COMANDOS ADMIN
-    const esAdmin = (telefono === ADMIN_PHONE || telLimpio === '5576683884');
+    const esAdmin = (telefono === ADMIN_PHONE || telLimpio === '5576683884' || String(telefono).includes('5576683884'));
 
     if (esAdmin) {
 
