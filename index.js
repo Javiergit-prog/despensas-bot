@@ -99,11 +99,11 @@ async function enviarCredencial(telefono, usuario) {
       `_Guarda este mensaje, es tu identificación oficial._`
     );
 
-    // Enviar QR como imagen via URL
+    // Enviar QR como imagen via URL publica
     await new Promise(r => setTimeout(r, 1000));
     await axios.post('https://api.wasenderapi.com/api/send-image', {
       to: tel,
-      url: qrUrl,
+      imageUrl: qrUrl,
       caption: '📱 Código QR de tu credencial: *' + usuario.id + '*'
     }, {
       headers: {
@@ -228,6 +228,18 @@ async function procesarMensaje(telefono, mensaje) {
       `📋 *SIGUIENTE PASO IMPORTANTE*\n\nPreséntate con el administrador para recoger tu *credencial física* con tu código de usuario.\n\nSin ella no podrás recoger tu despensa mensual. 🎁`
     );
 
+    // Notificar al admin primero
+    const telLimpio = telefono.replace('@s.whatsapp.net','').replace('@c.us','');
+    await enviarMensaje(ADMIN_PHONE,
+      `🆕 *NUEVO USUARIO REGISTRADO*\n\n` +
+      `👤 Nombre: ${nuevoUsuario.nombre}\n` +
+      `🪪 ID: ${nuevoID}\n` +
+      `📱 Teléfono: +${telLimpio}\n` +
+      `🎨 Nivel: ${nuevoUsuario.nivel} — ${COLORES_NIVEL[nuevoUsuario.nivel] || 'VIOLETA'}\n` +
+      `👥 Referido por: ${referidoPor || 'Ninguno'}\n` +
+      `📅 Fecha: ${new Date().toLocaleDateString('es-MX')}`
+    );
+
     // Enviar credencial digital al usuario
     await new Promise(r => setTimeout(r, 2000));
     await enviarCredencial(telefono, nuevoUsuario);
@@ -236,9 +248,6 @@ async function procesarMensaje(telefono, mensaje) {
     await new Promise(r => setTimeout(r, 2000));
     await enviarCredencial(ADMIN_PHONE, nuevoUsuario);
 
-    await enviarMensaje(ADMIN_PHONE,
-      `🆕 *NUEVO USUARIO REGISTRADO*\n\nNombre: ${nuevoUsuario.nombre}\nID: ${nuevoID}\nTeléfono: ${telefono}\nReferido por: ${referidoPor || 'Ninguno'}\nFecha: ${new Date().toLocaleDateString('es-MX')}`
-    );
     return;
   }
 
