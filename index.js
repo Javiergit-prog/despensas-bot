@@ -2,7 +2,6 @@ const express = require('express');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { createCanvas, loadImage } = require('canvas');
 
 const app = express();
 app.use(express.json());
@@ -62,118 +61,50 @@ async function enviarMensaje(telefono, mensaje) {
 }
 
 // ============================================================
-// GENERAR CREDENCIAL COMO IMAGEN PNG
+// COLORES POR NIVEL
 // ============================================================
 const COLORES_NIVEL = {
-  0: { fondo: ['#6a1b9a','#9c27b0'], nombre: 'VIOLETA' },
-  1: { fondo: ['#b8860b','#daa520'], nombre: 'DORADO' },
-  2: { fondo: ['#1565c0','#1976d2'], nombre: 'AZUL' },
-  3: { fondo: ['#e65100','#f57c00'], nombre: 'NARANJA' },
-  4: { fondo: ['#ad1457','#e91e8c'], nombre: 'ROSA' },
-  5: { fondo: ['#43a047','#66bb6a'], nombre: 'VERDE' },
-  6: { fondo: ['#f9a825','#fbc02d'], nombre: 'AMARILLO' },
-  7: { fondo: ['#00838f','#00acc1'], nombre: 'TURQUESA' },
-  8: { fondo: ['#1b5e20','#2e7d32'], nombre: 'VERDE BANDERA' },
-  9: { fondo: ['#546e7a','#78909c'], nombre: 'GRIS' }
+  0: 'VIOLETA', 1: 'DORADO',  2: 'AZUL',
+  3: 'NARANJA', 4: 'ROSA',    5: 'VERDE',
+  6: 'AMARILLO',7: 'TURQUESA',8: 'VERDE BANDERA', 9: 'GRIS'
 };
 
-async function generarCredencial(usuario) {
-  const W = 856, H = 540;
-  const canvas = createCanvas(W, H);
-  const ctx = canvas.getContext('2d');
-
-  const nivel = usuario.nivel || 2;
-  const colores = COLORES_NIVEL[nivel] || COLORES_NIVEL[2];
-
-  // Fondo degradado
-  const grad = ctx.createLinearGradient(0, 0, W, H);
-  grad.addColorStop(0, colores.fondo[0]);
-  grad.addColorStop(1, colores.fondo[1]);
-  ctx.fillStyle = grad;
-  ctx.roundRect(0, 0, W, H, 28);
-  ctx.fill();
-
-  // Círculos decorativos
-  ctx.fillStyle = 'rgba(255,255,255,0.07)';
-  ctx.beginPath(); ctx.arc(W+80, -80, 260, 0, Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(-60, H+60, 200, 0, Math.PI*2); ctx.fill();
-
-  // Banda superior
-  ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.fillRect(0, 0, W, 110);
-
-  // Nombre organización
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 38px sans-serif';
-  ctx.fillText('DespensaClub Familiar', 28, 52);
-  ctx.font = '18px sans-serif';
-  ctx.fillStyle = 'rgba(255,255,255,0.75)';
-  ctx.fillText('RED DE CONSUMO INTELIGENTE', 28, 80);
-
-  // Badge nivel
-  ctx.fillStyle = 'rgba(255,255,255,0.2)';
-  const badgeText = 'Nivel ' + nivel + ' · ' + colores.nombre;
-  const badgeW = ctx.measureText(badgeText).width + 30;
-  ctx.roundRect(W - badgeW - 20, 30, badgeW, 36, 18);
-  ctx.fill();
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 16px sans-serif';
-  ctx.fillText(badgeText, W - badgeW - 5, 54);
-
-  // Nombre usuario
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 42px sans-serif';
-  ctx.fillText(usuario.nombre.toUpperCase(), 28, 180);
-
-  // ID
-  ctx.fillStyle = 'rgba(0,0,0,0.2)';
-  ctx.roundRect(28, 200, 300, 44, 8);
-  ctx.fill();
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 22px sans-serif';
-  ctx.fillText(usuario.id, 42, 228);
-
-  // Vigencia
-  const fechaVigencia = new Date(usuario.fechaRegistro);
-  fechaVigencia.setFullYear(fechaVigencia.getFullYear() + 1);
-  const vigenciaStr = 'VIGENCIA: ' + fechaVigencia.toLocaleDateString('es-MX', {year:'numeric',month:'long'}).toUpperCase();
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  ctx.font = '18px sans-serif';
-  ctx.fillText(vigenciaStr, 28, 270);
-
-  // Teléfono
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.font = '16px sans-serif';
-  ctx.fillText('Tel: ' + usuario.telefono.replace('@s.whatsapp.net','').replace('@c.us',''), 28, 300);
-
-  // Línea divisoria
-  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(28, 330); ctx.lineTo(W-28, 330); ctx.stroke();
-
-  // Pie de página
-  ctx.fillStyle = 'rgba(255,255,255,0.5)';
-  ctx.font = '14px sans-serif';
-  ctx.fillText('Credencial válida por 1 año a partir del registro', 28, H-20);
-  ctx.fillText('DespensaClub Familiar © 2026', W-260, H-20);
-
-  // Guardar imagen
-  const filePath = path.join(__dirname, 'credencial_' + usuario.id + '.png');
-  const buffer = canvas.toBuffer('image/png');
-  fs.writeFileSync(filePath, buffer);
-  return filePath;
-}
-
+// ============================================================
+// ENVIAR CREDENCIAL COMO MENSAJE DE TEXTO DETALLADO
+// ============================================================
 async function enviarCredencial(telefono, usuario) {
   try {
-    const imagePath = await generarCredencial(usuario);
-    const imageData = fs.readFileSync(imagePath);
-    const base64Image = imageData.toString('base64');
+    const nivel = usuario.nivel || 0;
+    const color = COLORES_NIVEL[nivel] || 'VIOLETA';
+    const fechaVigencia = new Date(usuario.fechaRegistro);
+    fechaVigencia.setFullYear(fechaVigencia.getFullYear() + 1);
+    const vigencia = fechaVigencia.toLocaleDateString('es-MX', {year:'numeric', month:'long'}).toUpperCase();
+    const fechaRegistro = new Date(usuario.fechaRegistro).toLocaleDateString('es-MX');
+    const tel = telefono.replace('@s.whatsapp.net','').replace('@c.us','');
 
+    const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(usuario.id);
+
+    await enviarMensaje(telefono,
+      `🪪 ━━━━━━━━━━━━━━━━━━━━\n` +
+      `   *CREDENCIAL DIGITAL*\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `🛒 *DespensaClub Familiar*\n` +
+      `   Red de Consumo Inteligente\n\n` +
+      `👤 *${usuario.nombre.toUpperCase()}*\n\n` +
+      `🪪 ID: *${usuario.id}*\n` +
+      `🎨 Nivel: *${nivel} — ${color}*\n` +
+      `📅 Registro: ${fechaRegistro}\n` +
+      `⏳ Vigencia: ${vigencia}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `_Guarda este mensaje, es tu identificación oficial._`
+    );
+
+    // Enviar QR como imagen via URL
+    await new Promise(r => setTimeout(r, 1000));
     await axios.post('https://api.wasenderapi.com/api/send-image', {
-      to: telefono.replace('@s.whatsapp.net','').replace('@c.us',''),
-      image: 'data:image/png;base64,' + base64Image,
-      caption: '🪪 *TU CREDENCIAL DIGITAL*\n\nGuárdala, es tu identificación oficial en DespensaClub Familiar.'
+      to: tel,
+      url: qrUrl,
+      caption: '📱 Código QR de tu credencial: *' + usuario.id + '*'
     }, {
       headers: {
         'Authorization': 'Bearer ' + WASENDER_TOKEN,
@@ -181,8 +112,6 @@ async function enviarCredencial(telefono, usuario) {
       }
     });
 
-    // Limpiar archivo temporal
-    fs.unlinkSync(imagePath);
     console.log('✅ Credencial enviada a', telefono);
   } catch (err) {
     console.error('❌ Error enviando credencial:', err.response?.data || err.message);
