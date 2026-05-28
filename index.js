@@ -229,7 +229,7 @@ async function procesarMensaje(telefono, mensaje) {
     );
 
     // Notificar al admin primero
-    const telLimpio = telefono.replace('@s.whatsapp.net','').replace('@c.us','');
+    const telLimpio = String(telefono).replace('@s.whatsapp.net','').replace('@c.us','').replace('521','').replace('52','');
     await enviarMensaje(ADMIN_PHONE,
       `🆕 *NUEVO USUARIO REGISTRADO*\n\n` +
       `👤 Nombre: ${nuevoUsuario.nombre}\n` +
