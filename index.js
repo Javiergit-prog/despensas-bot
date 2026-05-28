@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const { createCanvas, loadImage } = require('canvas');
 
 const app = express();
 app.use(express.json());
@@ -57,6 +58,134 @@ async function enviarMensaje(telefono, mensaje) {
     });
   } catch (err) {
     console.error('Error enviando mensaje:', err.response?.data || err.message);
+  }
+}
+
+// ============================================================
+// GENERAR CREDENCIAL COMO IMAGEN PNG
+// ============================================================
+const COLORES_NIVEL = {
+  0: { fondo: ['#6a1b9a','#9c27b0'], nombre: 'VIOLETA' },
+  1: { fondo: ['#b8860b','#daa520'], nombre: 'DORADO' },
+  2: { fondo: ['#1565c0','#1976d2'], nombre: 'AZUL' },
+  3: { fondo: ['#e65100','#f57c00'], nombre: 'NARANJA' },
+  4: { fondo: ['#ad1457','#e91e8c'], nombre: 'ROSA' },
+  5: { fondo: ['#43a047','#66bb6a'], nombre: 'VERDE' },
+  6: { fondo: ['#f9a825','#fbc02d'], nombre: 'AMARILLO' },
+  7: { fondo: ['#00838f','#00acc1'], nombre: 'TURQUESA' },
+  8: { fondo: ['#1b5e20','#2e7d32'], nombre: 'VERDE BANDERA' },
+  9: { fondo: ['#546e7a','#78909c'], nombre: 'GRIS' }
+};
+
+async function generarCredencial(usuario) {
+  const W = 856, H = 540;
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+
+  const nivel = usuario.nivel || 2;
+  const colores = COLORES_NIVEL[nivel] || COLORES_NIVEL[2];
+
+  // Fondo degradado
+  const grad = ctx.createLinearGradient(0, 0, W, H);
+  grad.addColorStop(0, colores.fondo[0]);
+  grad.addColorStop(1, colores.fondo[1]);
+  ctx.fillStyle = grad;
+  ctx.roundRect(0, 0, W, H, 28);
+  ctx.fill();
+
+  // Círculos decorativos
+  ctx.fillStyle = 'rgba(255,255,255,0.07)';
+  ctx.beginPath(); ctx.arc(W+80, -80, 260, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(-60, H+60, 200, 0, Math.PI*2); ctx.fill();
+
+  // Banda superior
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(0, 0, W, 110);
+
+  // Nombre organización
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 38px sans-serif';
+  ctx.fillText('DespensaClub Familiar', 28, 52);
+  ctx.font = '18px sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.fillText('RED DE CONSUMO INTELIGENTE', 28, 80);
+
+  // Badge nivel
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  const badgeText = 'Nivel ' + nivel + ' · ' + colores.nombre;
+  const badgeW = ctx.measureText(badgeText).width + 30;
+  ctx.roundRect(W - badgeW - 20, 30, badgeW, 36, 18);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 16px sans-serif';
+  ctx.fillText(badgeText, W - badgeW - 5, 54);
+
+  // Nombre usuario
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 42px sans-serif';
+  ctx.fillText(usuario.nombre.toUpperCase(), 28, 180);
+
+  // ID
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.roundRect(28, 200, 300, 44, 8);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillText(usuario.id, 42, 228);
+
+  // Vigencia
+  const fechaVigencia = new Date(usuario.fechaRegistro);
+  fechaVigencia.setFullYear(fechaVigencia.getFullYear() + 1);
+  const vigenciaStr = 'VIGENCIA: ' + fechaVigencia.toLocaleDateString('es-MX', {year:'numeric',month:'long'}).toUpperCase();
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.font = '18px sans-serif';
+  ctx.fillText(vigenciaStr, 28, 270);
+
+  // Teléfono
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.font = '16px sans-serif';
+  ctx.fillText('Tel: ' + usuario.telefono.replace('@s.whatsapp.net','').replace('@c.us',''), 28, 300);
+
+  // Línea divisoria
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(28, 330); ctx.lineTo(W-28, 330); ctx.stroke();
+
+  // Pie de página
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = '14px sans-serif';
+  ctx.fillText('Credencial válida por 1 año a partir del registro', 28, H-20);
+  ctx.fillText('DespensaClub Familiar © 2026', W-260, H-20);
+
+  // Guardar imagen
+  const filePath = path.join(__dirname, 'credencial_' + usuario.id + '.png');
+  const buffer = canvas.toBuffer('image/png');
+  fs.writeFileSync(filePath, buffer);
+  return filePath;
+}
+
+async function enviarCredencial(telefono, usuario) {
+  try {
+    const imagePath = await generarCredencial(usuario);
+    const imageData = fs.readFileSync(imagePath);
+    const base64Image = imageData.toString('base64');
+
+    await axios.post('https://api.wasenderapi.com/api/send-image', {
+      to: telefono.replace('@s.whatsapp.net','').replace('@c.us',''),
+      image: 'data:image/png;base64,' + base64Image,
+      caption: '🪪 *TU CREDENCIAL DIGITAL*\n\nGuárdala, es tu identificación oficial en DespensaClub Familiar.'
+    }, {
+      headers: {
+        'Authorization': 'Bearer ' + WASENDER_TOKEN,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    // Limpiar archivo temporal
+    fs.unlinkSync(imagePath);
+    console.log('✅ Credencial enviada a', telefono);
+  } catch (err) {
+    console.error('❌ Error enviando credencial:', err.response?.data || err.message);
   }
 }
 
@@ -126,11 +255,19 @@ async function procesarMensaje(telefono, mensaje) {
 
     db.contador += 1;
     const nuevoID = generarID(db.contador);
+    // Calcular nivel basado en referidor
+    let nivelUsuario = 0;
+    if (referidoPor) {
+      const referidor = db.usuarios.find(u => u.id === referidoPor);
+      nivelUsuario = referidor ? (referidor.nivel || 0) + 1 : 1;
+    }
+
     const nuevoUsuario = {
       id: nuevoID,
       nombre: sesion.datos.nombre,
       telefono: telefono,
       referidoPor: referidoPor,
+      nivel: nivelUsuario,
       referidos: [],
       fechaRegistro: new Date().toISOString(),
       pagos: [],
@@ -159,8 +296,16 @@ async function procesarMensaje(telefono, mensaje) {
     await new Promise(r => setTimeout(r, 1500));
 
     await enviarMensaje(telefono,
-      `📋 *SIGUIENTE PASO IMPORTANTE*\n\nPreséntate con el administrador para recoger tu *credencial física* con tu código de usuario.\n\nSin ella no podrás recoger tu despensa mensual. 📦📆`
+      `📋 *SIGUIENTE PASO IMPORTANTE*\n\nPreséntate con el administrador para recoger tu *credencial física* con tu código de usuario.\n\nSin ella no podrás recoger tu despensa mensual. 🎁`
     );
+
+    // Enviar credencial digital al usuario
+    await new Promise(r => setTimeout(r, 2000));
+    await enviarCredencial(telefono, nuevoUsuario);
+
+    // Enviar credencial también al admin
+    await new Promise(r => setTimeout(r, 2000));
+    await enviarCredencial(ADMIN_PHONE, nuevoUsuario);
 
     await enviarMensaje(ADMIN_PHONE,
       `🆕 *NUEVO USUARIO REGISTRADO*\n\nNombre: ${nuevoUsuario.nombre}\nID: ${nuevoID}\nTeléfono: ${telefono}\nReferido por: ${referidoPor || 'Ninguno'}\nFecha: ${new Date().toLocaleDateString('es-MX')}`
@@ -190,7 +335,7 @@ async function procesarMensaje(telefono, mensaje) {
     const u = usuarioExistente;
     const restantes = 4 - u.referidos.length;
     await enviarMensaje(telefono,
-      `👥 *INVITAR REFERIDOS*\n\nTu código para invitar es:\n*${u.id}*\n\nComparte este mensaje:\n\n———————————————\n😀 Te invito a unirte a la red de despensas.\nEscribe *HOLA* al número del negocio y cuando te pida código de referido pon:\n*${u.id}*\n———————————————\n\nTienes *${u.referidos.length}/4* referidos.\nTe faltan *${restantes}* lugares.`
+      `👥 *INVITAR REFERIDOS*\n\nTu código para invitar es:\n*${u.id}*\n\nComparte este mensaje:\n\n———————————————\n🌽 Te invito a unirte a la red de despensas.\nEscribe *HOLA* al número del negocio y cuando te pida código de referido pon:\n*${u.id}*\n———————————————\n\nTienes *${u.referidos.length}/4* referidos.\nTe faltan *${restantes}* lugares.`
     );
     return;
   }
@@ -286,8 +431,108 @@ async function procesarMensaje(telefono, mensaje) {
 
     if (texto === 'LISTA') {
       if (db.usuarios.length === 0) { await enviarMensaje(telefono, `📋 No hay usuarios registrados aún.`); return; }
-      const lista = db.usuarios.slice(-10).map(u => `• ${u.id} — ${u.nombre} — ${u.referidos.length}/4 refs`).join('\n');
+      const lista = db.usuarios.slice(-10).map(u =>
+        `${u.activo ? '✅' : '❌'} ${u.id} — ${u.nombre} — Nivel ${u.nivel || 0} — ${u.referidos.length}/4 refs`
+      ).join('\n');
       await enviarMensaje(telefono, `📋 *ÚLTIMOS 10 USUARIOS*\n\n${lista}\n\nTotal: ${db.usuarios.length} usuarios`);
+      return;
+    }
+
+    // DESACTIVAR USUARIO
+    if (texto.startsWith('DESACTIVAR ')) {
+      const idUsuario = texto.split(' ')[1];
+      const idx = db.usuarios.findIndex(u => u.id === idUsuario);
+      if (idx === -1) { await enviarMensaje(telefono, `❌ No encontré el usuario ${idUsuario}`); return; }
+      if (!db.usuarios[idx].activo) { await enviarMensaje(telefono, `⚠️ El usuario ${idUsuario} ya está inactivo.`); return; }
+
+      // Desactivar usuario
+      db.usuarios[idx].activo = false;
+      db.usuarios[idx].fechaDesactivacion = new Date().toISOString();
+
+      // Congelar referidos que están abajo
+      const referidosAbajo = db.usuarios.filter(u => u.referidoPor === idUsuario);
+      referidosAbajo.forEach(r => {
+        const ridx = db.usuarios.findIndex(u => u.id === r.id);
+        db.usuarios[ridx].congelado = true;
+      });
+
+      guardarDB(db);
+
+      const nombreUsuario = db.usuarios[idx].nombre;
+      const cantCongelados = referidosAbajo.length;
+
+      await enviarMensaje(telefono,
+        `✅ *USUARIO DESACTIVADO*\n\n` +
+        `ID: ${idUsuario}\n` +
+        `Nombre: ${nombreUsuario}\n` +
+        `Referidos congelados: ${cantCongelados}\n\n` +
+        `${cantCongelados > 0 ? '⚠️ Tienes ' + cantCongelados + ' referido(s) congelado(s).\nUsa *ASIGNAR ' + 'DESP-XXXXXX' + ' ' + idUsuario + '* para asignar un nuevo responsable.' : ''}` 
+      );
+
+      // Notificar al usuario desactivado
+      await enviarMensaje(db.usuarios[idx].telefono,
+        `⚠️ *CUENTA SUSPENDIDA*\n\n` +
+        `Hola ${nombreUsuario}, tu cuenta ha sido suspendida.\n` +
+        `Contacta al administrador para más información.`
+      );
+      return;
+    }
+
+    // ACTIVAR USUARIO (reactivar)
+    if (texto.startsWith('ACTIVAR ')) {
+      const idUsuario = texto.split(' ')[1];
+      const idx = db.usuarios.findIndex(u => u.id === idUsuario);
+      if (idx === -1) { await enviarMensaje(telefono, `❌ No encontré el usuario ${idUsuario}`); return; }
+      if (db.usuarios[idx].activo) { await enviarMensaje(telefono, `⚠️ El usuario ${idUsuario} ya está activo.`); return; }
+
+      db.usuarios[idx].activo = true;
+      delete db.usuarios[idx].fechaDesactivacion;
+      guardarDB(db);
+
+      await enviarMensaje(telefono, `✅ Usuario ${db.usuarios[idx].nombre} (${idUsuario}) reactivado correctamente.`);
+      await enviarMensaje(db.usuarios[idx].telefono,
+        `✅ *CUENTA REACTIVADA*\n\nHola ${db.usuarios[idx].nombre}, tu cuenta ha sido reactivada.\n¡Bienvenido de nuevo! 🎁`
+      );
+      return;
+    }
+
+    // ASIGNAR NUEVO RESPONSABLE A REFERIDOS CONGELADOS
+    if (texto.startsWith('ASIGNAR ')) {
+      const partes = texto.split(' ');
+      if (partes.length < 3) {
+        await enviarMensaje(telefono, `❌ Formato incorrecto.\nUsa: *ASIGNAR DESP-000002 DESP-000001*\n(nuevo responsable → ID del desactivado)`);
+        return;
+      }
+      const nuevoResp = partes[1]; // nuevo responsable
+      const anteriorResp = partes[2]; // quien fue desactivado
+
+      const idxNuevo = db.usuarios.findIndex(u => u.id === nuevoResp);
+      if (idxNuevo === -1) { await enviarMensaje(telefono, `❌ No encontré al nuevo responsable ${nuevoResp}`); return; }
+
+      // Descongelar y reasignar referidos
+      let count = 0;
+      db.usuarios.forEach((u, i) => {
+        if (u.referidoPor === anteriorResp && u.congelado) {
+          db.usuarios[i].referidoPor = nuevoResp;
+          db.usuarios[i].congelado = false;
+          count++;
+        }
+      });
+
+      guardarDB(db);
+      await enviarMensaje(telefono,
+        `✅ *REASIGNACIÓN COMPLETADA*\n\n` +
+        `${count} referido(s) asignados a ${db.usuarios[idxNuevo].nombre} (${nuevoResp}).`
+      );
+      return;
+    }
+
+    // VER CONGELADOS
+    if (texto === 'CONGELADOS') {
+      const congelados = db.usuarios.filter(u => u.congelado);
+      if (congelados.length === 0) { await enviarMensaje(telefono, `✅ No hay referidos congelados.`); return; }
+      const lista = congelados.map(u => `• ${u.id} — ${u.nombre} — antes bajo: ${u.referidoPor}`).join('\n');
+      await enviarMensaje(telefono, `❄️ *REFERIDOS CONGELADOS*\n\n${lista}\n\nUsa *ASIGNAR* para reasignarlos.`);
       return;
     }
   }
@@ -327,7 +572,7 @@ app.post('/webhook', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.send('🌽 Bot de Despensas funcionando correctamente.');
+  res.send('🎁 Bot de Despensas funcionando correctamente.');
 });
 
 const PORT = process.env.PORT || 3000;
