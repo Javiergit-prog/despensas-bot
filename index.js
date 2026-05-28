@@ -317,15 +317,25 @@ async function procesarMensaje(telefono, mensaje) {
       const restantes = 4 - u.referidos.length;
       await enviarMensaje(telefono,
         '👥 *INVITAR REFERIDOS*\n\n' +
-        'Tu codigo para invitar es:\n*' + u.id + '*\n\n' +
-        'Comparte este mensaje:\n\n' +
+        'Tu codigo para invitar es: *' + u.id + '*\n' +
+        'Tienes *' + u.referidos.length + '/4* referidos. Te faltan *' + restantes + '*.\n\n' +
+        'Copia y comparte este mensaje:\n\n' +
         '——————————————\n' +
-        '🛒 Te invito a unirte a DespensaClub Familiar.\n' +
-        'Escribe *HOLA* al numero del negocio y cuando te pida codigo pon:\n' +
+        '🛒 *DESPENSACLUB*\n' +
+        '_Comunidad de Consumo Inteligente_\n\n' +
+        'Hola! Te invito a formar parte de nuestra comunidad de despensas mensuales.\n\n' +
+        '*¿Que es DespensaClub?*\n' +
+        'Una comunidad donde puedes adquirir productos de despensa mensualmente a un precio accesible y justo.\n\n' +
+        '*¿Como funciona?*\n' +
+        '1️⃣ Paga tu credencial y membresia — pago unico anual de solo *$50 pesos*\n' +
+        '2️⃣ Cada mes recoge tu despensa familiar por *$250 pesos*\n' +
+        '3️⃣ Al invitar a familiares, amigos y conocidos que tambien consuman, puedes acumular *bonos y descuentos* en tu membresia\n\n' +
+        '*¿Te gustaria registrarte y hacer tus compras de manera inteligente?*\n\n' +
+        '👇 Toca el enlace — el mensaje se escribe automaticamente, solo sigue los sencillos pasos:\n' +
+        'https://wa.me/525576683884?text=HOLA\n\n' +
+        '_Cuando te pidan codigo de referido escribe:_\n' +
         '*' + u.id + '*\n' +
-        '——————————————\n\n' +
-        'Tienes *' + u.referidos.length + '/4* referidos.\n' +
-        'Te faltan *' + restantes + '* lugares.'
+        '——————————————'
       );
       return;
     }
