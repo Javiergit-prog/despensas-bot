@@ -51,7 +51,7 @@ async function enviarMensaje(telefono, mensaje) {
       text: mensaje
     }, {
       headers: {
-        'Authorization': Bearer ${WASENDER_TOKEN},
+        'Authorization': `Bearer ${WASENDER_TOKEN}`,
         'Content-Type': 'application/json'
       }
     });
@@ -85,18 +85,18 @@ async function enviarCredencial(telefono, usuario) {
     const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(usuario.id);
 
     await enviarMensaje(telefono,
-      🪪 ━━━━━━━━━━━━━━━━━━━━\n +
-      `   CREDENCIAL DIGITAL\n` +
-      ━━━━━━━━━━━━━━━━━━━━\n\n +
-      🛒 *DespensaClub Familiar*\n +
+      `🪪 ━━━━━━━━━━━━━━━━━━━━\n` +
+      `   *CREDENCIAL DIGITAL*\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `🛒 *DespensaClub Familiar*\n` +
       `   Red de Consumo Inteligente\n\n` +
-      👤 *${usuario.nombre.toUpperCase()}*\n\n +
-      🪪 ID: *${usuario.id}*\n +
-      🎨 Nivel: *${nivel} — ${color}*\n +
-      📅 Registro: ${fechaRegistro}\n +
-      ⏳ Vigencia: ${vigencia}\n\n +
-      ━━━━━━━━━━━━━━━━━━━━\n +
-      _Guarda este mensaje, es tu identificación oficial._
+      `👤 *${usuario.nombre.toUpperCase()}*\n\n` +
+      `🪪 ID: *${usuario.id}*\n` +
+      `🎨 Nivel: *${nivel} — ${color}*\n` +
+      `📅 Registro: ${fechaRegistro}\n` +
+      `⏳ Vigencia: ${vigencia}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `_Guarda este mensaje, es tu identificación oficial._`
     );
 
     // Enviar QR como imagen via URL
@@ -104,7 +104,7 @@ async function enviarCredencial(telefono, usuario) {
     await axios.post('https://api.wasenderapi.com/api/send-image', {
       to: tel,
       url: qrUrl,
-      caption: '📱 Código QR de tu credencial: ' + usuario.id + ''
+      caption: '📱 Código QR de tu credencial: *' + usuario.id + '*'
     }, {
       headers: {
         'Authorization': 'Bearer ' + WASENDER_TOKEN,
@@ -122,7 +122,7 @@ async function enviarCredencial(telefono, usuario) {
 // MENÚ PRINCIPAL
 // ============================================================
 function menuPrincipal() {
-  return `🛒 ¡BIENVENIDO A TU RED DE DESPENSAS!
+  return `🛒 *¡BIENVENIDO A TU RED DE DESPENSAS!*
 
 ¿Qué deseas hacer?
 
@@ -132,7 +132,7 @@ function menuPrincipal() {
 4️⃣ Registrar mi pago
 5️⃣ Reportar un problema
 
-Responde con el número de tu opción.`;
+Responde con el *número* de tu opción.`;
 }
 
 // ============================================================
@@ -148,21 +148,21 @@ async function procesarMensaje(telefono, mensaje) {
   if (sesion.paso === 'menu' && texto === '1') {
     if (usuarioExistente) {
       await enviarMensaje(telefono,
-        ⚠️ Ya tienes una cuenta registrada.\n\nTu ID es: *${usuarioExistente.id}*\n\nEscribe *MENU* para ver las opciones.
+        `⚠️ Ya tienes una cuenta registrada.\n\nTu ID es: *${usuarioExistente.id}*\n\nEscribe *MENU* para ver las opciones.`
       );
       return;
     }
     sesiones[telefono] = { paso: 'pedir_nombre', datos: {} };
-    await enviarMensaje(telefono, `✏️ REGISTRO DE NUEVO USUARIO\n\n¿Cuál es tu nombre completo?
+    await enviarMensaje(telefono, `✏️ *REGISTRO DE NUEVO USUARIO*\n\n¿Cuál es tu nombre completo?
 
-📋 Por favor escríbelo tal como aparece en tu identificación INE`);
+📋 Por favor escríbelo *tal como aparece en tu identificación INE*`);
     return;
   }
 
   if (sesion.paso === 'pedir_nombre') {
     sesiones[telefono] = { paso: 'pedir_referido', datos: { nombre: texto } };
     await enviarMensaje(telefono,
-      👍 Gracias *${texto}*.\n\n¿Tienes un código de quien te invitó?\n(Ejemplo: DESP-000001)\n\nSi no tienes código, escribe *NO*
+      `👍 Gracias *${texto}*.\n\n¿Tienes un código de quien te invitó?\n(Ejemplo: DESP-000001)\n\nSi no tienes código, escribe *NO*`
     );
     return;
   }
@@ -175,7 +175,7 @@ async function procesarMensaje(telefono, mensaje) {
       const referidor = db.usuarios.find(u => u.id === codigoReferido);
       if (!referidor) {
         await enviarMensaje(telefono,
-          ❌ No encontré ese código. Verifica e intenta de nuevo.\n\nO escribe *NO* si no tienes código de referido.
+          `❌ No encontré ese código. Verifica e intenta de nuevo.\n\nO escribe *NO* si no tienes código de referido.`
         );
         return;
       }
@@ -209,7 +209,7 @@ async function procesarMensaje(telefono, mensaje) {
       if (idx !== -1) {
         db.usuarios[idx].referidos.push(nuevoID);
         await enviarMensaje(db.usuarios[idx].telefono,
-          🎉 ¡Tienes un nuevo referido!\n*${nuevoUsuario.nombre}* se registró con tu código.\nYa tienes *${db.usuarios[idx].referidos.length}* de 4 referidos.
+          `🎉 ¡Tienes un nuevo referido!\n*${nuevoUsuario.nombre}* se registró con tu código.\nYa tienes *${db.usuarios[idx].referidos.length}* de 4 referidos.`
         );
       }
     }
@@ -219,13 +219,13 @@ async function procesarMensaje(telefono, mensaje) {
     delete sesiones[telefono];
 
     await enviarMensaje(telefono,
-      ✅ *¡REGISTRO EXITOSO!*\n\nBienvenido *${nuevoUsuario.nombre}*\n\n🪪 Tu ID único es:\n*${nuevoID}*\n\nGuarda este ID, lo necesitarás siempre.
+      `✅ *¡REGISTRO EXITOSO!*\n\nBienvenido *${nuevoUsuario.nombre}*\n\n🪪 Tu ID único es:\n*${nuevoID}*\n\nGuarda este ID, lo necesitarás siempre.`
     );
 
     await new Promise(r => setTimeout(r, 1500));
 
     await enviarMensaje(telefono,
-      📋 *SIGUIENTE PASO IMPORTANTE*\n\nPreséntate con el administrador para recoger tu *credencial física* con tu código de usuario.\n\nSin ella no podrás recoger tu despensa mensual. 🎁
+      `📋 *SIGUIENTE PASO IMPORTANTE*\n\nPreséntate con el administrador para recoger tu *credencial física* con tu código de usuario.\n\nSin ella no podrás recoger tu despensa mensual. 🎁`
     );
 
     // Enviar credencial digital al usuario
@@ -237,7 +237,7 @@ async function procesarMensaje(telefono, mensaje) {
     await enviarCredencial(ADMIN_PHONE, nuevoUsuario);
 
     await enviarMensaje(ADMIN_PHONE,
-      🆕 *NUEVO USUARIO REGISTRADO*\n\nNombre: ${nuevoUsuario.nombre}\nID: ${nuevoID}\nTeléfono: ${telefono}\nReferido por: ${referidoPor || 'Ninguno'}\nFecha: ${new Date().toLocaleDateString('es-MX')}
+      `🆕 *NUEVO USUARIO REGISTRADO*\n\nNombre: ${nuevoUsuario.nombre}\nID: ${nuevoID}\nTeléfono: ${telefono}\nReferido por: ${referidoPor || 'Ninguno'}\nFecha: ${new Date().toLocaleDateString('es-MX')}`
     );
     return;
   }
@@ -245,12 +245,12 @@ async function procesarMensaje(telefono, mensaje) {
   // ── OPCIÓN 2: VER MI INFORMACIÓN ─────────────────────────
   if (sesion.paso === 'menu' && texto === '2') {
     if (!usuarioExistente) {
-      await enviarMensaje(telefono, ❌ No tienes cuenta registrada.\n\nEscribe *MENU* y elige la opción 1 para registrarte.);
+      await enviarMensaje(telefono, `❌ No tienes cuenta registrada.\n\nEscribe *MENU* y elige la opción 1 para registrarte.`);
       return;
     }
     const u = usuarioExistente;
     await enviarMensaje(telefono,
-      👤 *TU INFORMACIÓN*\n\n🪪 ID: *${u.id}*\n👤 Nombre: ${u.nombre}\n👥 Referidos: ${u.referidos.length}/4\n📅 Registro: ${new Date(u.fechaRegistro).toLocaleDateString('es-MX')}\n✅ Estado: ${u.activo ? 'Activo' : 'Inactivo'}\n\nEscribe *MENU* para volver al menú.
+      `👤 *TU INFORMACIÓN*\n\n🪪 ID: *${u.id}*\n👤 Nombre: ${u.nombre}\n👥 Referidos: ${u.referidos.length}/4\n📅 Registro: ${new Date(u.fechaRegistro).toLocaleDateString('es-MX')}\n✅ Estado: ${u.activo ? 'Activo' : 'Inactivo'}\n\nEscribe *MENU* para volver al menú.`
     );
     return;
   }
@@ -258,13 +258,13 @@ async function procesarMensaje(telefono, mensaje) {
   // ── OPCIÓN 3: INVITAR REFERIDOS ───────────────────────────
   if (sesion.paso === 'menu' && texto === '3') {
     if (!usuarioExistente) {
-      await enviarMensaje(telefono, ❌ Necesitas estar registrado primero.\n\nEscribe *MENU* para ver opciones.);
+      await enviarMensaje(telefono, `❌ Necesitas estar registrado primero.\n\nEscribe *MENU* para ver opciones.`);
       return;
     }
     const u = usuarioExistente;
     const restantes = 4 - u.referidos.length;
     await enviarMensaje(telefono,
-      👥 *INVITAR REFERIDOS*\n\nTu código para invitar es:\n*${u.id}*\n\nComparte este mensaje:\n\n———————————————\n🌽 Te invito a unirte a la red de despensas.\nEscribe *HOLA* al número del negocio y cuando te pida código de referido pon:\n*${u.id}*\n———————————————\n\nTienes *${u.referidos.length}/4* referidos.\nTe faltan *${restantes}* lugares.
+      `👥 *INVITAR REFERIDOS*\n\nTu código para invitar es:\n*${u.id}*\n\nComparte este mensaje:\n\n———————————————\n🌽 Te invito a unirte a la red de despensas.\nEscribe *HOLA* al número del negocio y cuando te pida código de referido pon:\n*${u.id}*\n———————————————\n\nTienes *${u.referidos.length}/4* referidos.\nTe faltan *${restantes}* lugares.`
     );
     return;
   }
@@ -272,24 +272,24 @@ async function procesarMensaje(telefono, mensaje) {
   // ── OPCIÓN 4: REGISTRAR PAGO ──────────────────────────────
   if (sesion.paso === 'menu' && texto === '4') {
     if (!usuarioExistente) {
-      await enviarMensaje(telefono, ❌ No tienes cuenta. Escribe *MENU* para registrarte.);
+      await enviarMensaje(telefono, `❌ No tienes cuenta. Escribe *MENU* para registrarte.`);
       return;
     }
     sesiones[telefono] = { paso: 'pedir_monto_pago', datos: {} };
-    await enviarMensaje(telefono, `💰 REGISTRAR PAGO
+    await enviarMensaje(telefono, `💰 *REGISTRAR PAGO*
 
-¿Cuánto vas a pagar? (solo el número, ejemplo: 250)
+¿Cuánto vas a pagar? (solo el número, ejemplo: *250*)
 
-📎 IMPORTANTE:
-1️⃣ Adjunta el comprobante de tu pago en este chat
-2️⃣ En la referencia de tu transferencia no olvides colocar tu número de ID de registro (ejemplo: DESP-000001)`);
+📎 *IMPORTANTE:*
+1️⃣ Adjunta el *comprobante de tu pago* en este chat
+2️⃣ En la referencia de tu transferencia no olvides colocar tu *número de ID de registro* (ejemplo: DESP-000001)`);
     return;
   }
 
   if (sesion.paso === 'pedir_monto_pago') {
     const monto = parseFloat(texto);
     if (isNaN(monto) || monto <= 0) {
-      await enviarMensaje(telefono, ❌ Escribe solo el número. Ejemplo: 200);
+      await enviarMensaje(telefono, `❌ Escribe solo el número. Ejemplo: 200`);
       return;
     }
     const idx = db.usuarios.findIndex(u => u.telefono === telefono);
@@ -297,9 +297,9 @@ async function procesarMensaje(telefono, mensaje) {
     guardarDB(db);
     delete sesiones[telefono];
 
-    await enviarMensaje(telefono, ✅ *PAGO REGISTRADO*\n\nMonto: $${monto}\nEstado: Pendiente de confirmación\n\nEl administrador confirmará tu pago en breve.);
+    await enviarMensaje(telefono, `✅ *PAGO REGISTRADO*\n\nMonto: $${monto}\nEstado: Pendiente de confirmación\n\nEl administrador confirmará tu pago en breve.`);
     await enviarMensaje(ADMIN_PHONE,
-      💰 *PAGO PENDIENTE DE CONFIRMAR*\n\nUsuario: ${usuarioExistente.nombre}\nID: ${usuarioExistente.id}\nMonto: $${monto}\nFecha: ${new Date().toLocaleDateString('es-MX')}\n\nPara confirmar escribe:\n*CONFIRMAR ${usuarioExistente.id}*
+      `💰 *PAGO PENDIENTE DE CONFIRMAR*\n\nUsuario: ${usuarioExistente.nombre}\nID: ${usuarioExistente.id}\nMonto: $${monto}\nFecha: ${new Date().toLocaleDateString('es-MX')}\n\nPara confirmar escribe:\n*CONFIRMAR ${usuarioExistente.id}*`
     );
     return;
   }
@@ -307,44 +307,44 @@ async function procesarMensaje(telefono, mensaje) {
   // ── OPCIÓN 5: REPORTAR PROBLEMA ───────────────────────────
   if (sesion.paso === 'menu' && texto === '5') {
     sesiones[telefono] = { paso: 'pedir_reporte', datos: {} };
-    await enviarMensaje(telefono, 📝 *REPORTAR PROBLEMA*\n\nDescribe tu problema y te contactaremos pronto:);
+    await enviarMensaje(telefono, `📝 *REPORTAR PROBLEMA*\n\nDescribe tu problema y te contactaremos pronto:`);
     return;
   }
 
   if (sesion.paso === 'pedir_reporte') {
     delete sesiones[telefono];
-    await enviarMensaje(telefono, ✅ Tu reporte fue enviado al administrador.\nTe contactaremos pronto.);
+    await enviarMensaje(telefono, `✅ Tu reporte fue enviado al administrador.\nTe contactaremos pronto.`);
     await enviarMensaje(ADMIN_PHONE,
-      ⚠️ *REPORTE DE USUARIO*\n\nDe: ${usuarioExistente ? usuarioExistente.nombre : telefono}\nID: ${usuarioExistente ? usuarioExistente.id : 'No registrado'}\nMensaje: ${texto}
+      `⚠️ *REPORTE DE USUARIO*\n\nDe: ${usuarioExistente ? usuarioExistente.nombre : telefono}\nID: ${usuarioExistente ? usuarioExistente.id : 'No registrado'}\nMensaje: ${texto}`
     );
     return;
   }
 
   // ── COMANDOS DE ADMINISTRADOR ─────────────────────────────
-  if (telefono === ADMIN_PHONE || telefono === ${ADMIN_PHONE}@s.whatsapp.net) {
+  if (telefono === ADMIN_PHONE || telefono === `${ADMIN_PHONE}@s.whatsapp.net`) {
 
     if (texto.startsWith('CONFIRMAR ')) {
       const idUsuario = texto.split(' ')[1];
       const idx = db.usuarios.findIndex(u => u.id === idUsuario);
-      if (idx === -1) { await enviarMensaje(telefono, ❌ No encontré el usuario ${idUsuario}); return; }
+      if (idx === -1) { await enviarMensaje(telefono, `❌ No encontré el usuario ${idUsuario}`); return; }
       const pagos = db.usuarios[idx].pagos;
       const pagoIdx = pagos.findLastIndex(p => p.estado === 'pendiente_confirmacion');
-      if (pagoIdx === -1) { await enviarMensaje(telefono, ❌ No hay pagos pendientes para ${idUsuario}); return; }
+      if (pagoIdx === -1) { await enviarMensaje(telefono, `❌ No hay pagos pendientes para ${idUsuario}`); return; }
       db.usuarios[idx].pagos[pagoIdx].estado = 'confirmado';
       guardarDB(db);
-      await enviarMensaje(telefono, ✅ Pago de ${db.usuarios[idx].nombre} confirmado.);
-      await enviarMensaje(db.usuarios[idx].telefono, ✅ *TU PAGO FUE CONFIRMADO*\n\nMonto: $${pagos[pagoIdx].monto}\n¡Gracias ${db.usuarios[idx].nombre}! 🌽);
+      await enviarMensaje(telefono, `✅ Pago de ${db.usuarios[idx].nombre} confirmado.`);
+      await enviarMensaje(db.usuarios[idx].telefono, `✅ *TU PAGO FUE CONFIRMADO*\n\nMonto: $${pagos[pagoIdx].monto}\n¡Gracias ${db.usuarios[idx].nombre}! 🌽`);
       return;
     }
 
     if (texto.startsWith('CONSUMO ')) {
       const idUsuario = texto.split(' ')[1];
       const idx = db.usuarios.findIndex(u => u.id === idUsuario);
-      if (idx === -1) { await enviarMensaje(telefono, ❌ No encontré el usuario ${idUsuario}); return; }
+      if (idx === -1) { await enviarMensaje(telefono, `❌ No encontré el usuario ${idUsuario}`); return; }
       db.usuarios[idx].consumos.push({ fecha: new Date().toISOString(), descripcion: 'Despensa mensual' });
       guardarDB(db);
-      await enviarMensaje(telefono, ✅ Consumo registrado para ${db.usuarios[idx].nombre} (${idUsuario}));
-      await enviarMensaje(db.usuarios[idx].telefono, 📦 *DESPENSA REGISTRADA*\n\nHola ${db.usuarios[idx].nombre}, tu despensa de este mes fue registrada.\nFecha: ${new Date().toLocaleDateString('es-MX')} 🌽);
+      await enviarMensaje(telefono, `✅ Consumo registrado para ${db.usuarios[idx].nombre} (${idUsuario})`);
+      await enviarMensaje(db.usuarios[idx].telefono, `📦 *DESPENSA REGISTRADA*\n\nHola ${db.usuarios[idx].nombre}, tu despensa de este mes fue registrada.\nFecha: ${new Date().toLocaleDateString('es-MX')} 🌽`);
       return;
     }
 
@@ -353,17 +353,17 @@ async function procesarMensaje(telefono, mensaje) {
       const activos = db.usuarios.filter(u => u.activo).length;
       const conPago = db.usuarios.filter(u => u.pagos.some(p => p.estado === 'confirmado')).length;
       await enviarMensaje(telefono,
-        📊 *REPORTE GENERAL*\n\n👥 Total usuarios: ${total}\n✅ Activos: ${activos}\n💰 Con pago confirmado: ${conPago}\n⏳ Sin pago: ${total - conPago}\n\nFecha: ${new Date().toLocaleDateString('es-MX')}
+        `📊 *REPORTE GENERAL*\n\n👥 Total usuarios: ${total}\n✅ Activos: ${activos}\n💰 Con pago confirmado: ${conPago}\n⏳ Sin pago: ${total - conPago}\n\nFecha: ${new Date().toLocaleDateString('es-MX')}`
       );
       return;
     }
 
     if (texto === 'LISTA') {
-      if (db.usuarios.length === 0) { await enviarMensaje(telefono, 📋 No hay usuarios registrados aún.); return; }
+      if (db.usuarios.length === 0) { await enviarMensaje(telefono, `📋 No hay usuarios registrados aún.`); return; }
       const lista = db.usuarios.slice(-10).map(u =>
-        ${u.activo ? '✅' : '❌'} ${u.id} — ${u.nombre} — Nivel ${u.nivel || 0} — ${u.referidos.length}/4 refs
+        `${u.activo ? '✅' : '❌'} ${u.id} — ${u.nombre} — Nivel ${u.nivel || 0} — ${u.referidos.length}/4 refs`
       ).join('\n');
-      await enviarMensaje(telefono, 📋 *ÚLTIMOS 10 USUARIOS*\n\n${lista}\n\nTotal: ${db.usuarios.length} usuarios);
+      await enviarMensaje(telefono, `📋 *ÚLTIMOS 10 USUARIOS*\n\n${lista}\n\nTotal: ${db.usuarios.length} usuarios`);
       return;
     }
 
@@ -371,8 +371,8 @@ async function procesarMensaje(telefono, mensaje) {
     if (texto.startsWith('DESACTIVAR ')) {
       const idUsuario = texto.split(' ')[1];
       const idx = db.usuarios.findIndex(u => u.id === idUsuario);
-      if (idx === -1) { await enviarMensaje(telefono, ❌ No encontré el usuario ${idUsuario}); return; }
-      if (!db.usuarios[idx].activo) { await enviarMensaje(telefono, ⚠️ El usuario ${idUsuario} ya está inactivo.); return; }
+      if (idx === -1) { await enviarMensaje(telefono, `❌ No encontré el usuario ${idUsuario}`); return; }
+      if (!db.usuarios[idx].activo) { await enviarMensaje(telefono, `⚠️ El usuario ${idUsuario} ya está inactivo.`); return; }
 
       // Desactivar usuario
       db.usuarios[idx].activo = false;
@@ -391,18 +391,18 @@ async function procesarMensaje(telefono, mensaje) {
       const cantCongelados = referidosAbajo.length;
 
       await enviarMensaje(telefono,
-        ✅ *USUARIO DESACTIVADO*\n\n +
-        ID: ${idUsuario}\n +
-        Nombre: ${nombreUsuario}\n +
-        Referidos congelados: ${cantCongelados}\n\n +
-        ${cantCongelados > 0 ? '⚠️ Tienes ' + cantCongelados + ' referido(s) congelado(s).\nUsa *ASIGNAR ' + 'DESP-XXXXXX' + ' ' + idUsuario + '* para asignar un nuevo responsable.' : ''} 
+        `✅ *USUARIO DESACTIVADO*\n\n` +
+        `ID: ${idUsuario}\n` +
+        `Nombre: ${nombreUsuario}\n` +
+        `Referidos congelados: ${cantCongelados}\n\n` +
+        `${cantCongelados > 0 ? '⚠️ Tienes ' + cantCongelados + ' referido(s) congelado(s).\nUsa *ASIGNAR ' + 'DESP-XXXXXX' + ' ' + idUsuario + '* para asignar un nuevo responsable.' : ''}` 
       );
 
       // Notificar al usuario desactivado
       await enviarMensaje(db.usuarios[idx].telefono,
-        ⚠️ *CUENTA SUSPENDIDA*\n\n +
-        Hola ${nombreUsuario}, tu cuenta ha sido suspendida.\n +
-        Contacta al administrador para más información.
+        `⚠️ *CUENTA SUSPENDIDA*\n\n` +
+        `Hola ${nombreUsuario}, tu cuenta ha sido suspendida.\n` +
+        `Contacta al administrador para más información.`
       );
       return;
     }
@@ -411,16 +411,16 @@ async function procesarMensaje(telefono, mensaje) {
     if (texto.startsWith('ACTIVAR ')) {
       const idUsuario = texto.split(' ')[1];
       const idx = db.usuarios.findIndex(u => u.id === idUsuario);
-      if (idx === -1) { await enviarMensaje(telefono, ❌ No encontré el usuario ${idUsuario}); return; }
-      if (db.usuarios[idx].activo) { await enviarMensaje(telefono, ⚠️ El usuario ${idUsuario} ya está activo.); return; }
+      if (idx === -1) { await enviarMensaje(telefono, `❌ No encontré el usuario ${idUsuario}`); return; }
+      if (db.usuarios[idx].activo) { await enviarMensaje(telefono, `⚠️ El usuario ${idUsuario} ya está activo.`); return; }
 
       db.usuarios[idx].activo = true;
       delete db.usuarios[idx].fechaDesactivacion;
       guardarDB(db);
 
-      await enviarMensaje(telefono, ✅ Usuario ${db.usuarios[idx].nombre} (${idUsuario}) reactivado correctamente.);
+      await enviarMensaje(telefono, `✅ Usuario ${db.usuarios[idx].nombre} (${idUsuario}) reactivado correctamente.`);
       await enviarMensaje(db.usuarios[idx].telefono,
-        ✅ *CUENTA REACTIVADA*\n\nHola ${db.usuarios[idx].nombre}, tu cuenta ha sido reactivada.\n¡Bienvenido de nuevo! 🎁
+        `✅ *CUENTA REACTIVADA*\n\nHola ${db.usuarios[idx].nombre}, tu cuenta ha sido reactivada.\n¡Bienvenido de nuevo! 🎁`
       );
       return;
     }
@@ -429,14 +429,14 @@ async function procesarMensaje(telefono, mensaje) {
     if (texto.startsWith('ASIGNAR ')) {
       const partes = texto.split(' ');
       if (partes.length < 3) {
-        await enviarMensaje(telefono, ❌ Formato incorrecto.\nUsa: *ASIGNAR DESP-000002 DESP-000001*\n(nuevo responsable → ID del desactivado));
+        await enviarMensaje(telefono, `❌ Formato incorrecto.\nUsa: *ASIGNAR DESP-000002 DESP-000001*\n(nuevo responsable → ID del desactivado)`);
         return;
       }
       const nuevoResp = partes[1]; // nuevo responsable
       const anteriorResp = partes[2]; // quien fue desactivado
 
       const idxNuevo = db.usuarios.findIndex(u => u.id === nuevoResp);
-      if (idxNuevo === -1) { await enviarMensaje(telefono, ❌ No encontré al nuevo responsable ${nuevoResp}); return; }
+      if (idxNuevo === -1) { await enviarMensaje(telefono, `❌ No encontré al nuevo responsable ${nuevoResp}`); return; }
 
       // Descongelar y reasignar referidos
       let count = 0;
@@ -450,8 +450,8 @@ async function procesarMensaje(telefono, mensaje) {
 
       guardarDB(db);
       await enviarMensaje(telefono,
-        ✅ *REASIGNACIÓN COMPLETADA*\n\n +
-        ${count} referido(s) asignados a ${db.usuarios[idxNuevo].nombre} (${nuevoResp}).
+        `✅ *REASIGNACIÓN COMPLETADA*\n\n` +
+        `${count} referido(s) asignados a ${db.usuarios[idxNuevo].nombre} (${nuevoResp}).`
       );
       return;
     }
@@ -460,16 +460,16 @@ async function procesarMensaje(telefono, mensaje) {
     if (texto === 'RESETBD') {
       const db2 = { usuarios: [], contador: 0 };
       guardarDB(db2);
-      await enviarMensaje(telefono, ✅ Base de datos limpiada. Todos los usuarios de prueba fueron eliminados.);
+      await enviarMensaje(telefono, `✅ Base de datos limpiada. Todos los usuarios de prueba fueron eliminados.`);
       return;
     }
 
     // VER CONGELADOS
     if (texto === 'CONGELADOS') {
       const congelados = db.usuarios.filter(u => u.congelado);
-      if (congelados.length === 0) { await enviarMensaje(telefono, ✅ No hay referidos congelados.); return; }
-      const lista = congelados.map(u => • ${u.id} — ${u.nombre} — antes bajo: ${u.referidoPor}).join('\n');
-      await enviarMensaje(telefono, ❄️ *REFERIDOS CONGELADOS*\n\n${lista}\n\nUsa *ASIGNAR* para reasignarlos.);
+      if (congelados.length === 0) { await enviarMensaje(telefono, `✅ No hay referidos congelados.`); return; }
+      const lista = congelados.map(u => `• ${u.id} — ${u.nombre} — antes bajo: ${u.referidoPor}`).join('\n');
+      await enviarMensaje(telefono, `❄️ *REFERIDOS CONGELADOS*\n\n${lista}\n\nUsa *ASIGNAR* para reasignarlos.`);
       return;
     }
   }
@@ -500,11 +500,11 @@ app.post('/webhook', async (req, res) => {
   if (!telefono || !mensaje) return;
   if (telefono.includes('@g.us')) return; // ignorar grupos
 
-  console.log(📩 Mensaje de ${telefono}: ${mensaje});
+  console.log(`📩 Mensaje de ${telefono}: ${mensaje}`);
   try {
     await procesarMensaje(telefono, mensaje);
   } catch (err) {
-    console.error(❌ Error procesando mensaje de ${telefono}:, err.message);
+    console.error(`❌ Error procesando mensaje de ${telefono}:`, err.message);
   }
 });
 
@@ -514,5 +514,5 @@ app.get('/', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(🚀 Bot corriendo en puerto ${PORT});
+  console.log(`🚀 Bot corriendo en puerto ${PORT}`);
 });
