@@ -27,7 +27,7 @@ const DB_FILE = path.join(__dirname, 'usuarios.json');
 
 function cargarDB() {
   if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify({ usuarios: [], contador: 0 }));
+    fs.writeFileSync(DB_FILE, JSON.stringify({ usuarios: [], contador: 109 }));
   }
   return JSON.parse(fs.readFileSync(DB_FILE));
 }
@@ -208,6 +208,16 @@ async function procesarMensaje(telefono, mensaje) {
           await enviarMensaje(telefono, '❌ No encontre ese codigo. Verifica e intenta de nuevo.\n\nO escribe *NO* si no tienes codigo.');
           return;
         }
+        // Verificar si el referidor ya tiene 4 referidos
+        if (referidor.referidos.length >= 4) {
+          await enviarMensaje(telefono,
+            '⛔ *CODIGO NO DISPONIBLE*\n\n' +
+            'El usuario con ese codigo ya completo sus 4 lugares disponibles.\n\n' +
+            'Contacta al administrador para mas informacion:\n' +
+            'https://wa.me/525576683884?text=Hola%20necesito%20ayuda%20con%20un%20registro'
+          );
+          return;
+        }
         referidoPor = codigoReferido;
       }
 
@@ -257,7 +267,7 @@ async function procesarMensaje(telefono, mensaje) {
       await new Promise(r => setTimeout(r, 1500));
 
       await enviarMensaje(telefono,
-        '📋 *SIGUIENTE PASO IMPORTANTE*\n\nPrestate con el administrador para recoger tu *credencial fisica* con tu codigo de usuario.\n\nSin ella no podras recoger tu despensa mensual. 🎁'
+        '📋 *SIGUIENTE PASO IMPORTANTE*\n\nPreséntate con el administrador para recoger tu *credencial fisica* con tu codigo de usuario.\n\nSin ella no podras recoger tu despensa mensual. 🎁'
       );
 
       // Notificar al admin
@@ -315,6 +325,18 @@ async function procesarMensaje(telefono, mensaje) {
       }
       const u = usuarioExistente;
       const restantes = 4 - u.referidos.length;
+
+      // Bloquear si ya tiene 4 referidos
+      if (u.referidos.length >= 4) {
+        await enviarMensaje(telefono,
+          '⛔ *YA COMPLETASTE TUS 4 REFERIDOS*\n\n' +
+          'Tu estructura esta completa con:\n' +
+          u.referidos.map(function(r, i) { return (i+1) + '. ' + r; }).join('\n') + '\n\n' +
+          'Si deseas hacer algun cambio comunicate directamente con el administrador.\n\n' +
+          '📱 Contactar admin:\nhttps://wa.me/525576683884?text=Hola%20necesito%20ayuda%20con%20mis%20referidos'
+        );
+        return;
+      }
       await enviarMensaje(telefono,
         '👥 *INVITAR REFERIDOS*\n\n' +
         'Tu codigo para invitar es: *' + u.id + '*\n' +
@@ -332,7 +354,7 @@ async function procesarMensaje(telefono, mensaje) {
         '3️⃣ Al invitar a familiares, amigos y conocidos que tambien consuman, puedes acumular *bonos y descuentos* en tu membresia\n\n' +
         '*¿Te gustaria registrarte y hacer tus compras de manera inteligente?*\n\n' +
         '👇 Toca el enlace — el mensaje se escribe automaticamente, solo sigue los sencillos pasos:\n' +
-        'https://wa.me/525576683884?text=HOLA\n\n' +
+        'https://wa.me/525576683884?text=Hola\n\n' +
         '_Cuando te pidan codigo de referido escribe:_\n' +
         '*' + u.id + '*\n' +
         '——————————————'
@@ -410,7 +432,7 @@ async function procesarMensaje(telefono, mensaje) {
     if (esAdmin) {
 
       if (texto === 'RESETBD') {
-        guardarDB({ usuarios: [], contador: 0 });
+        guardarDB({ usuarios: [], contador: 109 });
         await enviarMensaje(telefono, '✅ Base de datos limpiada correctamente.');
         return;
       }
