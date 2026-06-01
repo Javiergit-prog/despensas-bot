@@ -542,8 +542,21 @@ app.post('/webhook', async function(req, res) {
     var mensaje = null;
     var fromMe = false;
 
-    // WasenderAPI format
-    if (data.event && data.data) {
+    // WasenderAPI format (español: evento/datos/mensajes/clave)
+    if (data.evento && data.datos) {
+      var d = data.datos;
+      var mensajes = d.mensajes || d.message || d;
+      var clave = mensajes.clave || mensajes.key || {};
+      fromMe = clave.fromMe || clave.deMi || false;
+      if (fromMe) return;
+      telefono = clave.remoteJid || clave.jidRemoto || d.senderPn || d.cleanedSenderPn || null;
+      var msgContent = mensajes.mensaje || mensajes.message || {};
+      mensaje = msgContent.conversation || msgContent.conversacion ||
+                (msgContent.extendedTextMessage && msgContent.extendedTextMessage.text) ||
+                mensajes.body || mensajes.texto || null;
+    }
+    // WasenderAPI format (English: event/data)
+    else if (data.event && data.data) {
       var d = data.data;
       fromMe = (d.key && d.key.fromMe) || false;
       if (fromMe) return;
