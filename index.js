@@ -534,13 +534,44 @@ app.post('/webhook', async function(req, res) {
   try {
     const data = req.body;
     if (!data) return;
-    const msg = data.message || data.data || data;
-    if (!msg) return;
-    if (msg.fromMe || msg.from_me) return;
-    const telefono = msg.from || msg.sender || msg.chatId;
-    const mensaje = msg.body || msg.text || msg.content;
-    if (!telefono || !mensaje) return;
+
+    // Log full body for debugging
+    console.log('Webhook recibido:', JSON.stringify(data).substring(0, 300));
+
+    var telefono = null;
+    var mensaje = null;
+    var fromMe = false;
+
+    // WasenderAPI format
+    if (data.event && data.data) {
+      var d = data.data;
+      fromMe = (d.key && d.key.fromMe) || false;
+      if (fromMe) return;
+      telefono = (d.key && d.key.remoteJid) || null;
+      mensaje = (d.message && (d.message.conversation || d.message.extendedTextMessage && d.message.extendedTextMessage.text)) || null;
+    }
+    // UltraMsg / generic format
+    else if (data.data) {
+      var msg = data.data;
+      fromMe = msg.fromMe || msg.from_me || false;
+      if (fromMe) return;
+      telefono = msg.from || msg.sender || msg.chatId;
+      mensaje = msg.body || msg.text || msg.content;
+    }
+    // Direct format
+    else {
+      fromMe = data.fromMe || data.from_me || false;
+      if (fromMe) return;
+      telefono = data.from || data.sender || data.chatId;
+      mensaje = data.body || data.text || data.content;
+    }
+
+    if (!telefono || !mensaje) {
+      console.log('Sin telefono o mensaje en webhook');
+      return;
+    }
     if (String(telefono).includes('@g.us')) return;
+
     console.log('Mensaje de ' + telefono + ': ' + mensaje);
     await procesarMensaje(telefono, mensaje);
   } catch (err) {
@@ -552,7 +583,7 @@ app.get('/', function(req, res) {
   res.send('Bot DespensaClub Familiar funcionando correctamente.');
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, function() {
+const PORT = process.env.PORT || process.env.RAILWAY_TCP_PROXY_PORT || 3000;
+app.listen(PORT, '0.0.0.0', function() {
   console.log('Bot corriendo en puerto ' + PORT);
 });
