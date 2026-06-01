@@ -542,34 +542,35 @@ app.post('/webhook', async function(req, res) {
     var mensaje = null;
     var fromMe = false;
 
-    // WasenderAPI format (español: evento/datos/mensajes/clave)
-    if (data.evento && data.datos) {
+    // WasenderAPI formato real confirmado
+    if (data.event === 'messages.received' && data.data) {
+      var d = data.data;
+      var messages = d.messages || d.message || d;
+      var key = messages.key || {};
+      fromMe = key.fromMe || false;
+      if (fromMe) return;
+      // Teléfono: usar cleanedSenderPn o senderPn del key
+      telefono = key.cleanedSenderPn || key.senderPn || key.remoteJid || null;
+      // Mensaje: buscar en message.conversation
+      var msgContent = messages.message || messages.mensaje || {};
+      mensaje = msgContent.conversation ||
+                (msgContent.extendedTextMessage && msgContent.extendedTextMessage.text) ||
+                messages.body || messages.text || null;
+      console.log('Tel: ' + telefono + ' | Msg: ' + mensaje);
+    }
+    // Formato español
+    else if (data.evento && data.datos) {
       var d = data.datos;
-      // Log completo para debug
-      console.log('DATOS COMPLETOS:', JSON.stringify(d));
       var mensajes = d.mensajes || {};
       var clave = mensajes.clave || {};
       fromMe = clave.fromMe || false;
       if (fromMe) return;
-      telefono = d.cleanedSenderPn || d.senderPn || clave.remoteJid || null;
-      // Buscar mensaje en todos los posibles campos
-      var msgObj = mensajes.mensaje || mensajes.message || mensajes.texto || {};
+      telefono = clave.cleanedSenderPn || clave.senderPn || clave.remoteJid || null;
+      var msgObj = mensajes.mensaje || mensajes.message || {};
       mensaje = msgObj.conversation ||
-                msgObj.texto ||
                 (msgObj.extendedTextMessage && msgObj.extendedTextMessage.text) ||
-                mensajes.body ||
-                mensajes.texto ||
-                mensajes.content ||
-                d.body || d.texto || null;
-      console.log('Tel: ' + telefono + ' | Msg: ' + mensaje);
-    }
-    // WasenderAPI format (English: event/data)
-    else if (data.event && data.data) {
-      var d = data.data;
-      fromMe = (d.key && d.key.fromMe) || false;
-      if (fromMe) return;
-      telefono = (d.key && d.key.remoteJid) || null;
-      mensaje = (d.message && (d.message.conversation || d.message.extendedTextMessage && d.message.extendedTextMessage.text)) || null;
+                mensajes.body || null;
+      console.log('Tel esp: ' + telefono + ' | Msg: ' + mensaje);
     }
     // UltraMsg / generic format
     else if (data.data) {
