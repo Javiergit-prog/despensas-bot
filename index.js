@@ -545,15 +545,18 @@ app.post('/webhook', async function(req, res) {
     // WasenderAPI format (español: evento/datos/mensajes/clave)
     if (data.evento && data.datos) {
       var d = data.datos;
-      var mensajes = d.mensajes || d.message || d;
-      var clave = mensajes.clave || mensajes.key || {};
-      fromMe = clave.fromMe || clave.deMi || false;
+      var mensajes = d.mensajes || {};
+      var clave = mensajes.clave || {};
+      fromMe = clave.fromMe || false;
       if (fromMe) return;
-      telefono = clave.remoteJid || clave.jidRemoto || d.senderPn || d.cleanedSenderPn || null;
-      var msgContent = mensajes.mensaje || mensajes.message || {};
-      mensaje = msgContent.conversation || msgContent.conversacion ||
-                (msgContent.extendedTextMessage && msgContent.extendedTextMessage.text) ||
-                mensajes.body || mensajes.texto || null;
+      // El teléfono viene en senderPn o cleanedSenderPn
+      telefono = d.senderPn || d.cleanedSenderPn || clave.remoteJid || null;
+      // El mensaje viene en mensajes.mensaje.conversation o mensajes.body
+      var msgObj = mensajes.mensaje || mensajes.message || {};
+      mensaje = msgObj.conversation ||
+                (msgObj.extendedTextMessage && msgObj.extendedTextMessage.text) ||
+                mensajes.body || d.body || null;
+      console.log('Tel: ' + telefono + ' | Msg: ' + mensaje);
     }
     // WasenderAPI format (English: event/data)
     else if (data.event && data.data) {
