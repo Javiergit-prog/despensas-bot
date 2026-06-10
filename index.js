@@ -2,6 +2,63 @@ const express = require('express');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const mongoose = require('mongoose');
+
+// ============================================================
+// CONEXION A MONGODB
+// ============================================================
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://frjvvm_db_user:xInjqY3rKOkUN1w1@despensasclub.pvtaydt.mongodb.net/despensasclub?appName=despensasclub';
+
+mongoose.connect(MONGODB_URI)
+  .then(function() { console.log('✅ Conectado a MongoDB Atlas'); })
+  .catch(function(err) { console.error('❌ Error MongoDB:', err.message); });
+
+// ============================================================
+// MODELO DE USUARIO EN MONGODB
+// ============================================================
+const usuarioSchema = new mongoose.Schema({
+  id: { type: String, unique: true, required: true },
+  nombre: String,
+  telefono: String,
+  telefonoLimpio: String,
+  referidoPor: String,
+  nivel: { type: Number, default: 0 },
+  referidos: [String],
+  fechaRegistro: { type: Date, default: Date.now },
+  vigencia: Date,
+  pagos: [{
+    monto: Number,
+    fecha: Date,
+    estado: String
+  }],
+  consumos: [{
+    fecha: Date,
+    descripcion: String
+  }],
+  activo: { type: Boolean, default: true },
+  congelado: { type: Boolean, default: false }
+});
+
+const Usuario = mongoose.model('Usuario', usuarioSchema);
+
+// ============================================================
+// MODELO DE CONTADOR EN MONGODB
+// ============================================================
+const contadorSchema = new mongoose.Schema({
+  nombre: { type: String, unique: true },
+  valor: { type: Number, default: 109 }
+});
+
+const Contador = mongoose.model('Contador', contadorSchema);
+
+async function obtenerSiguienteContador() {
+  const contador = await Contador.findOneAndUpdate(
+    { nombre: 'usuarios' },
+    { $inc: { valor: 1 } },
+    { upsert: true, new: true }
+  );
+  return contador.valor;
+}
 
 const app = express();
 app.use(express.json());
@@ -21,21 +78,8 @@ const COLORES_NIVEL = {
 };
 
 // ============================================================
-// BASE DE DATOS
+// FUNCIONES DE BASE DE DATOS (MongoDB)
 // ============================================================
-const DB_FILE = path.join(__dirname, 'usuarios.json');
-
-function cargarDB() {
-  if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify({ usuarios: [], contador: 109 }));
-  }
-  return JSON.parse(fs.readFileSync(DB_FILE));
-}
-
-function guardarDB(db) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
-}
-
 function generarID(contador) {
   return 'DESP-' + String(contador).padStart(6, '0');
 }
@@ -146,11 +190,10 @@ function menuPrincipal() {
 // ============================================================
 async function procesarMensaje(telefono, mensaje) {
   try {
-    const db = cargarDB();
     const texto = mensaje.trim();
     const sesion = sesiones[telefono] || { paso: 'menu' };
-    const usuarioExistente = db.usuarios.find(function(u) { return u.telefono === telefono; });
     const telLimpio = String(telefono).replace('@s.whatsapp.net', '').replace('@c.us', '');
+    const usuarioExistente = await Usuario.findOne({ telefono: telefono });
 
     // ── COMANDO ADMIN RAPIDO (funciona desde cualquier paso)
     if (texto === 'RESETBD' && String(telefono).includes('5576683884')) {
@@ -209,7 +252,8 @@ async function procesarMensaje(telefono, mensaje) {
           return;
         }
         // Verificar si el referidor ya tiene 4 referidos
-        if (referidor.referidos.length >= 4) {
+        const refCount = referidor.referidos ? referidor.referidos.length : 0;
+        if (refCount >= 4) {
           await enviarMensaje(telefono,
             '⛔ *CODIGO NO DISPONIBLE*\n\n' +
             'El usuario con ese codigo ya completo sus 4 lugares disponibles.\n\n' +
@@ -228,9 +272,12 @@ async function procesarMensaje(telefono, mensaje) {
         nivelUsuario = referidor ? (referidor.nivel || 0) + 1 : 1;
       }
 
-      db.contador += 1;
-      const nuevoID = generarID(db.contador);
-      const nuevoUsuario = {
+      const contadorVal = await obtenerSiguienteContador();
+      const nuevoID = generarID(contadorVal);
+      const fechaRegistro = new Date();
+      const fechaVigencia = new Date(fechaRegistro);
+      fechaVigencia.setFullYear(fechaVigencia.getFullYear() + 1);
+      const nuevoUsuario = new Usuario({
         id: nuevoID,
         nombre: sesion.datos.nombre,
         telefono: telefono,
@@ -238,25 +285,26 @@ async function procesarMensaje(telefono, mensaje) {
         referidoPor: referidoPor,
         nivel: nivelUsuario,
         referidos: [],
-        fechaRegistro: new Date().toISOString(),
+        fechaRegistro: fechaRegistro,
+        vigencia: fechaVigencia,
         pagos: [],
         consumos: [],
         activo: true
-      };
+      });
 
       // Actualizar referidos del invitador
       if (referidoPor) {
-        const idx = db.usuarios.findIndex(function(u) { return u.id === referidoPor; });
-        if (idx !== -1) {
-          db.usuarios[idx].referidos.push(nuevoID);
-          await enviarMensaje(db.usuarios[idx].telefono,
-            '🎉 Tienes un nuevo referido!\n*' + nuevoUsuario.nombre + '* se registro con tu codigo.\nYa tienes *' + db.usuarios[idx].referidos.length + '* de 4 referidos.'
+        const referidor = await Usuario.findOne({ id: referidoPor });
+        if (referidor) {
+          await Usuario.updateOne({ id: referidoPor }, { $push: { referidos: nuevoID } });
+          const totalReferidos = referidor.referidos.length + 1;
+          await enviarMensaje(referidor.telefono,
+            '🎉 Tienes un nuevo referido!\n*' + nuevoUsuario.nombre + '* se registro con tu codigo.\nYa tienes *' + totalReferidos + '* de 4 referidos.'
           );
         }
       }
 
-      db.usuarios.push(nuevoUsuario);
-      guardarDB(db);
+      await nuevoUsuario.save();
       delete sesiones[telefono];
 
       // Mensaje de confirmacion al usuario
@@ -267,7 +315,7 @@ async function procesarMensaje(telefono, mensaje) {
       await new Promise(r => setTimeout(r, 1500));
 
       await enviarMensaje(telefono,
-        '📋 *SIGUIENTE PASO IMPORTANTE*\n\nPreséntate con el administrador para recoger tu *credencial fisica* con tu codigo de usuario.\n\nSin ella no podras recoger tu despensa mensual. 🎁'
+        '📋 *SIGUIENTE PASO IMPORTANTE*\n\nPrestate con el administrador para recoger tu *credencial fisica* con tu codigo de usuario.\n\nSin ella no podras recoger tu despensa mensual. 🎁'
       );
 
       // Notificar al admin
@@ -304,6 +352,7 @@ async function procesarMensaje(telefono, mensaje) {
       }
       const u = usuarioExistente;
       const color = COLORES_NIVEL[u.nivel || 0] || 'VIOLETA';
+      const vigenciaStr = u.vigencia ? new Date(u.vigencia).toLocaleDateString('es-MX') : 'N/A';
       await enviarMensaje(telefono,
         '👤 *TU INFORMACION*\n\n' +
         '🪪 ID: *' + u.id + '*\n' +
@@ -311,6 +360,7 @@ async function procesarMensaje(telefono, mensaje) {
         '🎨 Nivel: ' + (u.nivel || 0) + ' — ' + color + '\n' +
         '👥 Referidos: ' + u.referidos.length + '/4\n' +
         '📅 Registro: ' + new Date(u.fechaRegistro).toLocaleDateString('es-MX') + '\n' +
+        '⏳ Vigencia: ' + vigenciaStr + '\n' +
         '✅ Estado: ' + (u.activo ? 'Activo' : 'Inactivo') + '\n\n' +
         'Escribe MENU para volver.'
       );
@@ -354,7 +404,7 @@ async function procesarMensaje(telefono, mensaje) {
         '3️⃣ Al invitar a familiares, amigos y conocidos que tambien consuman, puedes acumular *bonos y descuentos* en tu membresia\n\n' +
         '*¿Te gustaria registrarte y hacer tus compras de manera inteligente?*\n\n' +
         '👇 Toca el enlace — el mensaje se escribe automaticamente, solo sigue los sencillos pasos:\n' +
-        'https://wa.me/525576683884?text=Hola\n\n' +
+        'https://wa.me/525576683884?text=HOLA\n\n' +
         '_Cuando te pidan codigo de referido escribe:_\n' +
         '*' + u.id + '*\n' +
         '——————————————'
@@ -385,9 +435,10 @@ async function procesarMensaje(telefono, mensaje) {
         await enviarMensaje(telefono, '❌ Escribe solo el numero. Ejemplo: 250');
         return;
       }
-      const idx = db.usuarios.findIndex(function(u) { return u.telefono === telefono; });
-      db.usuarios[idx].pagos.push({ monto: monto, fecha: new Date().toISOString(), estado: 'pendiente_confirmacion' });
-      guardarDB(db);
+      await Usuario.updateOne(
+        { telefono: telefono },
+        { $push: { pagos: { monto: monto, fecha: new Date(), estado: 'pendiente_confirmacion' } } }
+      );
       delete sesiones[telefono];
 
       await enviarMensaje(telefono, '✅ *PAGO REGISTRADO*\n\nMonto: $' + monto + '\nEstado: Pendiente de confirmacion\n\nEl administrador confirmara tu pago en breve.');
@@ -439,52 +490,46 @@ async function procesarMensaje(telefono, mensaje) {
 
       if (texto.startsWith('CONFIRMAR ')) {
         const idU = texto.split(' ')[1];
-        const idx = db.usuarios.findIndex(function(u) { return u.id === idU; });
-        if (idx === -1) { await enviarMensaje(telefono, '❌ No encontre el usuario ' + idU); return; }
-        const pagoIdx = db.usuarios[idx].pagos.findLastIndex(function(p) { return p.estado === 'pendiente_confirmacion'; });
+        const userU = await Usuario.findOne({ id: idU });
+        if (!userU) { await enviarMensaje(telefono, '❌ No encontre el usuario ' + idU); return; }
+        const pagoIdx = userU.pagos.findLastIndex(function(p) { return p.estado === 'pendiente_confirmacion'; });
         if (pagoIdx === -1) { await enviarMensaje(telefono, '❌ No hay pagos pendientes para ' + idU); return; }
-        db.usuarios[idx].pagos[pagoIdx].estado = 'confirmado';
-        guardarDB(db);
-        await enviarMensaje(telefono, '✅ Pago de ' + db.usuarios[idx].nombre + ' confirmado.');
-        await enviarMensaje(db.usuarios[idx].telefono, '✅ *TU PAGO FUE CONFIRMADO*\n\nMonto: $' + db.usuarios[idx].pagos[pagoIdx].monto + '\nGracias ' + db.usuarios[idx].nombre + '! 🎁');
+        userU.pagos[pagoIdx].estado = 'confirmado';
+        await userU.save();
+        await enviarMensaje(telefono, '✅ Pago de ' + userU.nombre + ' confirmado.');
+        await enviarMensaje(userU.telefono, '✅ *TU PAGO FUE CONFIRMADO*\n\nMonto: $' + userU.pagos[pagoIdx].monto + '\nGracias ' + userU.nombre + '! 🎁');
         return;
       }
 
       if (texto.startsWith('CONSUMO ')) {
         const idU = texto.split(' ')[1];
-        const idx = db.usuarios.findIndex(function(u) { return u.id === idU; });
-        if (idx === -1) { await enviarMensaje(telefono, '❌ No encontre el usuario ' + idU); return; }
-        db.usuarios[idx].consumos.push({ fecha: new Date().toISOString(), descripcion: 'Despensa mensual' });
-        guardarDB(db);
-        await enviarMensaje(telefono, '✅ Consumo registrado para ' + db.usuarios[idx].nombre + ' (' + idU + ')');
-        await enviarMensaje(db.usuarios[idx].telefono, '📦 *DESPENSA REGISTRADA*\n\nHola ' + db.usuarios[idx].nombre + ', tu despensa fue registrada.\nFecha: ' + new Date().toLocaleDateString('es-MX') + ' 🎁');
+        const userU = await Usuario.findOne({ id: idU });
+        if (!userU) { await enviarMensaje(telefono, '❌ No encontre el usuario ' + idU); return; }
+        await Usuario.updateOne({ id: idU }, { $push: { consumos: { fecha: new Date(), descripcion: 'Despensa mensual' } } });
+        await enviarMensaje(telefono, '✅ Consumo registrado para ' + userU.nombre + ' (' + idU + ')');
+        await enviarMensaje(userU.telefono, '📦 *DESPENSA REGISTRADA*\n\nHola ' + userU.nombre + ', tu despensa fue registrada.\nFecha: ' + new Date().toLocaleDateString('es-MX') + ' 🎁');
         return;
       }
 
       if (texto.startsWith('DESACTIVAR ')) {
         const idU = texto.split(' ')[1];
-        const idx = db.usuarios.findIndex(function(u) { return u.id === idU; });
-        if (idx === -1) { await enviarMensaje(telefono, '❌ No encontre el usuario ' + idU); return; }
-        db.usuarios[idx].activo = false;
-        const congelados = db.usuarios.filter(function(u) { return u.referidoPor === idU; });
-        congelados.forEach(function(r) {
-          const ridx = db.usuarios.findIndex(function(u) { return u.id === r.id; });
-          db.usuarios[ridx].congelado = true;
-        });
-        guardarDB(db);
-        await enviarMensaje(telefono, '✅ Usuario ' + db.usuarios[idx].nombre + ' desactivado.\nReferidos congelados: ' + congelados.length);
-        await enviarMensaje(db.usuarios[idx].telefono, '⚠️ Tu cuenta ha sido suspendida.\nContacta al administrador.');
+        const userU = await Usuario.findOne({ id: idU });
+        if (!userU) { await enviarMensaje(telefono, '❌ No encontre el usuario ' + idU); return; }
+        await Usuario.updateOne({ id: idU }, { activo: false });
+        const congelados = await Usuario.find({ referidoPor: idU });
+        await Usuario.updateMany({ referidoPor: idU }, { congelado: true });
+        await enviarMensaje(telefono, '✅ Usuario ' + userU.nombre + ' desactivado.\nReferidos congelados: ' + congelados.length);
+        await enviarMensaje(userU.telefono, '⚠️ Tu cuenta ha sido suspendida.\nContacta al administrador.');
         return;
       }
 
       if (texto.startsWith('ACTIVAR ')) {
         const idU = texto.split(' ')[1];
-        const idx = db.usuarios.findIndex(function(u) { return u.id === idU; });
-        if (idx === -1) { await enviarMensaje(telefono, '❌ No encontre el usuario ' + idU); return; }
-        db.usuarios[idx].activo = true;
-        guardarDB(db);
-        await enviarMensaje(telefono, '✅ Usuario ' + db.usuarios[idx].nombre + ' reactivado.');
-        await enviarMensaje(db.usuarios[idx].telefono, '✅ Tu cuenta ha sido reactivada. Bienvenido de nuevo! 🎁');
+        const userU = await Usuario.findOne({ id: idU });
+        if (!userU) { await enviarMensaje(telefono, '❌ No encontre el usuario ' + idU); return; }
+        await Usuario.updateOne({ id: idU }, { activo: true });
+        await enviarMensaje(telefono, '✅ Usuario ' + userU.nombre + ' reactivado.');
+        await enviarMensaje(userU.telefono, '✅ Tu cuenta ha sido reactivada. Bienvenido de nuevo! 🎁');
         return;
       }
 
@@ -493,21 +538,16 @@ async function procesarMensaje(telefono, mensaje) {
         if (partes.length < 3) { await enviarMensaje(telefono, '❌ Usa: ASIGNAR DESP-000002 DESP-000001'); return; }
         const nuevoResp = partes[1];
         const anteriorResp = partes[2];
-        let count = 0;
-        db.usuarios.forEach(function(u, i) {
-          if (u.referidoPor === anteriorResp && u.congelado) {
-            db.usuarios[i].referidoPor = nuevoResp;
-            db.usuarios[i].congelado = false;
-            count++;
-          }
-        });
-        guardarDB(db);
-        await enviarMensaje(telefono, '✅ ' + count + ' referido(s) reasignados correctamente.');
+        const result = await Usuario.updateMany(
+          { referidoPor: anteriorResp, congelado: true },
+          { referidoPor: nuevoResp, congelado: false }
+        );
+        await enviarMensaje(telefono, '✅ ' + result.modifiedCount + ' referido(s) reasignados correctamente.');
         return;
       }
 
       if (texto === 'CONGELADOS') {
-        const congelados = db.usuarios.filter(function(u) { return u.congelado; });
+        const congelados = await Usuario.find({ congelado: true });
         if (congelados.length === 0) { await enviarMensaje(telefono, '✅ No hay referidos congelados.'); return; }
         const lista = congelados.map(function(u) { return '• ' + u.id + ' — ' + u.nombre; }).join('\n');
         await enviarMensaje(telefono, '❄️ *REFERIDOS CONGELADOS*\n\n' + lista);
@@ -530,11 +570,13 @@ async function procesarMensaje(telefono, mensaje) {
       }
 
       if (texto === 'LISTA') {
-        if (db.usuarios.length === 0) { await enviarMensaje(telefono, '📋 No hay usuarios registrados.'); return; }
-        const lista = db.usuarios.slice(-10).map(function(u) {
+        const total = await Usuario.countDocuments();
+        if (total === 0) { await enviarMensaje(telefono, '📋 No hay usuarios registrados.'); return; }
+        const ultimos = await Usuario.find().sort({ fechaRegistro: -1 }).limit(10);
+        const lista = ultimos.map(function(u) {
           return (u.activo ? '✅' : '❌') + ' ' + u.id + ' — ' + u.nombre + ' — Nv.' + (u.nivel || 0) + ' — ' + u.referidos.length + '/4';
         }).join('\n');
-        await enviarMensaje(telefono, '📋 *ULTIMOS 10 USUARIOS*\n\n' + lista + '\n\nTotal: ' + db.usuarios.length);
+        await enviarMensaje(telefono, '📋 *ULTIMOS 10 USUARIOS*\n\n' + lista + '\n\nTotal: ' + total);
         return;
       }
     }
