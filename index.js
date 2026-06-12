@@ -17,7 +17,7 @@ const CORREO_ADMIN = 'frjvvm@gmail.com';
 // ============================================================
 // CONEXION A MONGODB
 // ============================================================
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://frjvvm_db_user:xInjqY3rKOkUN1w1@despensasclub.pvtaydt.mongodb.net/despensasclub?appName=despensasclub';
+const MONGODB_URI = process.env.MONGODB_URI || '';
 
 mongoose.connect(MONGODB_URI)
   .then(function() { 
@@ -80,9 +80,9 @@ app.use(express.urlencoded({ extended: true }));
 // ============================================================
 // CONFIGURACION
 // ============================================================
-const WASENDER_TOKEN = process.env.WASENDER_TOKEN || '3b7473e48f999ed47678f31fb456aa20550a8bbf344e621d80481755dc0a2bc6';
+const WASENDER_TOKEN = process.env.WASENDER_TOKEN || '';
 const WASENDER_URL = 'https://api.wasenderapi.com/api/send-message';
-const ADMIN_PHONE = process.env.ADMIN_PHONE || '525576683884';
+const ADMIN_PHONE = process.env.ADMIN_PHONE || '';
 
 const COLORES_NIVEL = {
   0: 'VIOLETA', 1: 'DORADO', 2: 'AZUL',
