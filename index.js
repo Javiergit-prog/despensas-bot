@@ -3,6 +3,16 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
+const nodeCrypto = require('crypto');
+
+// ============================================================
+// CONFIGURACION EMAILJS
+// ============================================================
+const EMAILJS_SERVICE_ID = 'service_qdoz20b';
+const EMAILJS_TEMPLATE_ID = 'template_7xmu2ye';
+const EMAILJS_PUBLIC_KEY = 'TN6yyL23TFRCIrhNU';
+const EMAILJS_PRIVATE_KEY = 'T-fVkQwGEytNRHbOH1_QL';
+const CORREO_ADMIN = 'frjvvm@gmail.com';
 
 // ============================================================
 // CONEXION A MONGODB
@@ -10,7 +20,10 @@ const mongoose = require('mongoose');
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://frjvvm_db_user:xInjqY3rKOkUN1w1@despensasclub.pvtaydt.mongodb.net/despensasclub?appName=despensasclub';
 
 mongoose.connect(MONGODB_URI)
-  .then(function() { console.log('✅ Conectado a MongoDB Atlas'); })
+  .then(function() { 
+    console.log('✅ Conectado a MongoDB Atlas');
+    iniciarRespaldoDiario();
+  })
   .catch(function(err) { console.error('❌ Error MongoDB:', err.message); });
 
 // ============================================================
@@ -166,6 +179,66 @@ async function enviarCredencial(telefono, usuario) {
   } catch (err) {
     console.error('Error enviando credencial:', err.message);
   }
+}
+
+// ============================================================
+// FUNCION DE RESPALDO AUTOMATICO DIARIO
+// ============================================================
+async function enviarRespaldoDiario() {
+  try {
+    console.log('Iniciando respaldo diario...');
+    const usuarios = await Usuario.find({});
+    const total = usuarios.length;
+    const activos = usuarios.filter(function(u) { return u.activo; }).length;
+    const inactivos = total - activos;
+    const fecha = new Date().toLocaleDateString('es-MX', { 
+      year: 'numeric', month: 'long', day: 'numeric', 
+      hour: '2-digit', minute: '2-digit' 
+    });
+
+    // Crear resumen de usuarios
+    const resumen = usuarios.map(function(u) {
+      return u.id + ' | ' + u.nombre + ' | Nv.' + (u.nivel||0) + ' | ' + 
+             (u.activo ? 'Activo' : 'Inactivo') + ' | Refs: ' + u.referidos.length + '/4 | ' +
+             'Registro: ' + new Date(u.fechaRegistro).toLocaleDateString('es-MX');
+    }).join('\n');
+
+    // Enviar via EmailJS API
+    const response = await axios.post('https://api.emailjs.com/api/v1.0/email/send', {
+      service_id: EMAILJS_SERVICE_ID,
+      template_id: EMAILJS_TEMPLATE_ID,
+      user_id: EMAILJS_PUBLIC_KEY,
+      accessToken: EMAILJS_PRIVATE_KEY,
+      template_params: {
+        fecha: fecha,
+        total: total.toString(),
+        activos: activos.toString(),
+        inactivos: inactivos.toString(),
+        respaldo: resumen || 'No hay usuarios registrados',
+        email: CORREO_ADMIN
+      }
+    });
+
+    console.log('✅ Respaldo enviado a ' + CORREO_ADMIN);
+  } catch (err) {
+    console.error('❌ Error enviando respaldo:', err.response ? JSON.stringify(err.response.data) : err.message);
+  }
+}
+
+// Programar respaldo diario a las 11 PM hora Mexico (5 AM UTC)
+function iniciarRespaldoDiario() {
+  var ahora = new Date();
+  var proximaEjecucion = new Date();
+  proximaEjecucion.setUTCHours(5, 0, 0, 0); // 11 PM Mexico = 5 AM UTC
+  if (proximaEjecucion <= ahora) {
+    proximaEjecucion.setDate(proximaEjecucion.getDate() + 1);
+  }
+  var tiempoEspera = proximaEjecucion - ahora;
+  console.log('Proximo respaldo en ' + Math.round(tiempoEspera/1000/60) + ' minutos');
+  setTimeout(function() {
+    enviarRespaldoDiario();
+    setInterval(enviarRespaldoDiario, 24 * 60 * 60 * 1000); // cada 24 horas
+  }, tiempoEspera);
 }
 
 // ============================================================
@@ -481,6 +554,13 @@ async function procesarMensaje(telefono, mensaje) {
     );
 
     if (esAdmin) {
+
+      if (texto === 'RESPALDO') {
+        await enviarMensaje(telefono, '📧 Enviando respaldo a tu correo...');
+        await enviarRespaldoDiario();
+        await enviarMensaje(telefono, '✅ Respaldo enviado a ' + CORREO_ADMIN);
+        return;
+      }
 
       if (texto === 'RESETBD') {
         guardarDB({ usuarios: [], contador: 109 });
