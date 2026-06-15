@@ -274,7 +274,13 @@ async function procesarMensaje(telefono, mensaje) {
     const usuarioExistente = await Usuario.findOne({ telefono: telefono });
 
     // ── COMANDO ADMIN RAPIDO (funciona desde cualquier paso)
-    if (texto === 'RESETBD' && (String(telefono).includes('5576683884') || ADMIN_PHONE.includes(String(telLimpio).slice(-10)))) {
+    const esSuperAdmin = (
+      String(telefono).includes('5576683884') ||
+      String(telLimpio).includes('5576683884') ||
+      ADMIN_PHONE.includes(String(telLimpio).slice(-10))
+    );
+
+    if (texto === 'RESETBD' && esSuperAdmin) {
       await Usuario.deleteMany({});
       await Contador.deleteMany({});
       Object.keys(sesiones).forEach(k => delete sesiones[k]);
@@ -282,7 +288,7 @@ async function procesarMensaje(telefono, mensaje) {
       return;
     }
 
-    if (texto === 'REPORTE' && (String(telefono).includes('5576683884') || ADMIN_PHONE.includes(String(telLimpio).slice(-10)))) {
+    if (texto === 'REPORTE' && esSuperAdmin) {
       const total = await Usuario.countDocuments();
       const activos = await Usuario.countDocuments({ activo: true });
       const conPago = await Usuario.countDocuments({ 'pagos.estado': 'confirmado' });
@@ -290,7 +296,7 @@ async function procesarMensaje(telefono, mensaje) {
       return;
     }
 
-    if (texto === 'LISTA' && (String(telefono).includes('5576683884') || ADMIN_PHONE.includes(String(telLimpio).slice(-10)))) {
+    if (texto === 'LISTA' && esSuperAdmin) {
       const total = await Usuario.countDocuments();
       if (total === 0) { await enviarMensaje(telefono, 'No hay usuarios.'); return; }
       const ultimos = await Usuario.find().sort({ fechaRegistro: -1 }).limit(10);
@@ -556,8 +562,6 @@ async function procesarMensaje(telefono, mensaje) {
     const esAdmin = (
       String(telefono).includes('5576683884') ||
       String(telLimpio).includes('5576683884') ||
-      telefono === ADMIN_PHONE ||
-      String(telefono).replace('521', '52').includes(ADMIN_PHONE) ||
       ADMIN_PHONE.includes(String(telLimpio).slice(-10))
     );
 
@@ -755,6 +759,47 @@ app.post('/webhook', async function(req, res) {
     await procesarMensaje(telefono, mensaje);
   } catch (err) {
     console.error('Error en webhook:', err.message);
+  }
+});
+
+app.get('/admin/resetbd', async function(req, res) {
+  if (req.query.key !== 'despensas2026') {
+    return res.status(403).send('Acceso denegado');
+  }
+  try {
+    await Usuario.deleteMany({});
+    await Contador.deleteMany({});
+    Object.keys(sesiones).forEach(k => delete sesiones[k]);
+    res.send('✅ Base de datos limpiada. Contador reiniciado en DESP-000110.');
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+app.get('/admin/respaldo', async function(req, res) {
+  if (req.query.key !== 'despensas2026') {
+    return res.status(403).send('Acceso denegado');
+  }
+  try {
+    await enviarRespaldoDiario();
+    res.send('✅ Respaldo enviado a ' + CORREO_ADMIN);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+app.get('/admin/lista', async function(req, res) {
+  if (req.query.key !== 'despensas2026') {
+    return res.status(403).send('Acceso denegado');
+  }
+  try {
+    const usuarios = await Usuario.find({}).sort({ fechaRegistro: -1 });
+    const lista = usuarios.map(u =>
+      `${u.id} | ${u.nombre} | Tel: ${u.telefonoLimpio} | Nv.${u.nivel} | ${u.activo ? 'Activo' : 'Inactivo'} | Refs: ${u.referidos.length}/4`
+    ).join('\n');
+    res.send(`Total: ${usuarios.length}\n\n${lista || 'Sin usuarios'}`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
   }
 });
 
