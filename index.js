@@ -4,15 +4,21 @@ const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
 const nodeCrypto = require('crypto');
+const nodemailer = require('nodemailer');
 
 // ============================================================
-// CONFIGURACION EMAILJS
+// CONFIGURACION NODEMAILER
 // ============================================================
-const EMAILJS_SERVICE_ID = 'service_qdoz20b';
-const EMAILJS_TEMPLATE_ID = 'template_7xmu2ye';
-const EMAILJS_PUBLIC_KEY = 'TN6yyL23TFRCIrhNU';
-const EMAILJS_PRIVATE_KEY = 'T-fVkQwGEytNRHbOH1_QL';
 const CORREO_ADMIN = 'frjvvm@gmail.com';
+const GMAIL_PASSWORD = 'ormbnuavluezgvst';
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: CORREO_ADMIN,
+    pass: GMAIL_PASSWORD
+  }
+});
 
 // ============================================================
 // CONEXION A MONGODB
@@ -203,20 +209,19 @@ async function enviarRespaldoDiario() {
              'Registro: ' + new Date(u.fechaRegistro).toLocaleDateString('es-MX');
     }).join('\n');
 
-    // Enviar via EmailJS API
-    const response = await axios.post('https://api.emailjs.com/api/v1.0/email/send', {
-      service_id: EMAILJS_SERVICE_ID,
-      template_id: EMAILJS_TEMPLATE_ID,
-      user_id: EMAILJS_PUBLIC_KEY,
-      accessToken: EMAILJS_PRIVATE_KEY,
-      template_params: {
-        fecha: fecha,
-        total: total.toString(),
-        activos: activos.toString(),
-        inactivos: inactivos.toString(),
-        respaldo: resumen || 'No hay usuarios registrados',
-        email: CORREO_ADMIN
-      }
+    // Enviar via Nodemailer
+    await transporter.sendMail({
+      from: '"DespensaClub Bot" <' + CORREO_ADMIN + '>',
+      to: CORREO_ADMIN,
+      subject: '📦 Respaldo DespensaClub — ' + fecha,
+      text: 
+        'RESPALDO DIARIO DESPENSACLUB\n\n' +
+        'Fecha: ' + fecha + '\n' +
+        'Total usuarios: ' + total + '\n' +
+        'Activos: ' + activos + '\n' +
+        'Inactivos: ' + inactivos + '\n\n' +
+        '── LISTA DE USUARIOS ──\n\n' +
+        (resumen || 'No hay usuarios registrados')
     });
 
     console.log('✅ Respaldo enviado a ' + CORREO_ADMIN);
@@ -270,28 +275,29 @@ async function procesarMensaje(telefono, mensaje) {
 
     // ── COMANDO ADMIN RAPIDO (funciona desde cualquier paso)
     if (texto === 'RESETBD' && String(telefono).includes('5576683884')) {
-      guardarDB({ usuarios: [], contador: 0 });
+      await Usuario.deleteMany({});
+      await Contador.deleteMany({});
       Object.keys(sesiones).forEach(k => delete sesiones[k]);
-      await enviarMensaje(telefono, 'Base de datos limpiada correctamente. Todos los usuarios de prueba eliminados.');
+      await enviarMensaje(telefono, '✅ Base de datos limpiada correctamente. Todos los usuarios eliminados.');
       return;
     }
 
     if (texto === 'REPORTE' && String(telefono).includes('5576683884')) {
-      const db2 = cargarDB();
-      const total = db2.usuarios.length;
-      const activos = db2.usuarios.filter(function(u) { return u.activo; }).length;
-      const conPago = db2.usuarios.filter(function(u) { return u.pagos.some(function(p) { return p.estado === 'confirmado'; }); }).length;
-      await enviarMensaje(telefono, 'REPORTE GENERAL\n\nTotal: ' + total + '\nActivos: ' + activos + '\nCon pago: ' + conPago + '\nSin pago: ' + (total - conPago));
+      const total = await Usuario.countDocuments();
+      const activos = await Usuario.countDocuments({ activo: true });
+      const conPago = await Usuario.countDocuments({ 'pagos.estado': 'confirmado' });
+      await enviarMensaje(telefono, '📊 REPORTE GENERAL\n\nTotal: ' + total + '\nActivos: ' + activos + '\nCon pago: ' + conPago + '\nSin pago: ' + (total - conPago));
       return;
     }
 
     if (texto === 'LISTA' && String(telefono).includes('5576683884')) {
-      const db2 = cargarDB();
-      if (db2.usuarios.length === 0) { await enviarMensaje(telefono, 'No hay usuarios.'); return; }
-      const lista = db2.usuarios.slice(-10).map(function(u) {
+      const total = await Usuario.countDocuments();
+      if (total === 0) { await enviarMensaje(telefono, 'No hay usuarios.'); return; }
+      const ultimos = await Usuario.find().sort({ fechaRegistro: -1 }).limit(10);
+      const lista = ultimos.map(function(u) {
         return (u.activo ? 'OK' : 'XX') + ' ' + u.id + ' ' + u.nombre + ' Nv.' + (u.nivel||0);
       }).join('\n');
-      await enviarMensaje(telefono, 'ULTIMOS 10 USUARIOS\n\n' + lista + '\n\nTotal: ' + db2.usuarios.length);
+      await enviarMensaje(telefono, 'ULTIMOS 10 USUARIOS\n\n' + lista + '\n\nTotal: ' + total);
       return;
     }
 
@@ -319,7 +325,7 @@ async function procesarMensaje(telefono, mensaje) {
       let referidoPor = null;
 
       if (codigoReferido !== 'NO') {
-        const referidor = db.usuarios.find(function(u) { return u.id === codigoReferido; });
+        const referidor = await Usuario.findOne({ id: codigoReferido });
         if (!referidor) {
           await enviarMensaje(telefono, '❌ No encontre ese codigo. Verifica e intenta de nuevo.\n\nO escribe *NO* si no tienes codigo.');
           return;
@@ -341,7 +347,7 @@ async function procesarMensaje(telefono, mensaje) {
       // Calcular nivel
       let nivelUsuario = 0;
       if (referidoPor) {
-        const referidor = db.usuarios.find(function(u) { return u.id === referidoPor; });
+        const referidor = await Usuario.findOne({ id: referidoPor });
         nivelUsuario = referidor ? (referidor.nivel || 0) + 1 : 1;
       }
 
@@ -563,7 +569,9 @@ async function procesarMensaje(telefono, mensaje) {
       }
 
       if (texto === 'RESETBD') {
-        guardarDB({ usuarios: [], contador: 109 });
+        await Usuario.deleteMany({});
+        await Contador.deleteMany({});
+        Object.keys(sesiones).forEach(k => delete sesiones[k]);
         await enviarMensaje(telefono, '✅ Base de datos limpiada correctamente.');
         return;
       }
@@ -635,9 +643,9 @@ async function procesarMensaje(telefono, mensaje) {
       }
 
       if (texto === 'REPORTE') {
-        const total = db.usuarios.length;
-        const activos = db.usuarios.filter(function(u) { return u.activo; }).length;
-        const conPago = db.usuarios.filter(function(u) { return u.pagos.some(function(p) { return p.estado === 'confirmado'; }); }).length;
+        const total = await Usuario.countDocuments();
+        const activos = await Usuario.countDocuments({ activo: true });
+        const conPago = await Usuario.countDocuments({ 'pagos.estado': 'confirmado' });
         await enviarMensaje(telefono,
           '📊 *REPORTE GENERAL*\n\n' +
           '👥 Total usuarios: ' + total + '\n' +
