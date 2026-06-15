@@ -274,7 +274,7 @@ async function procesarMensaje(telefono, mensaje) {
     const usuarioExistente = await Usuario.findOne({ telefono: telefono });
 
     // ── COMANDO ADMIN RAPIDO (funciona desde cualquier paso)
-    if (texto === 'RESETBD' && String(telefono).includes('5576683884')) {
+    if (texto === 'RESETBD' && (String(telefono).includes('5576683884') || ADMIN_PHONE.includes(String(telLimpio).slice(-10)))) {
       await Usuario.deleteMany({});
       await Contador.deleteMany({});
       Object.keys(sesiones).forEach(k => delete sesiones[k]);
@@ -282,7 +282,7 @@ async function procesarMensaje(telefono, mensaje) {
       return;
     }
 
-    if (texto === 'REPORTE' && String(telefono).includes('5576683884')) {
+    if (texto === 'REPORTE' && (String(telefono).includes('5576683884') || ADMIN_PHONE.includes(String(telLimpio).slice(-10)))) {
       const total = await Usuario.countDocuments();
       const activos = await Usuario.countDocuments({ activo: true });
       const conPago = await Usuario.countDocuments({ 'pagos.estado': 'confirmado' });
@@ -290,7 +290,7 @@ async function procesarMensaje(telefono, mensaje) {
       return;
     }
 
-    if (texto === 'LISTA' && String(telefono).includes('5576683884')) {
+    if (texto === 'LISTA' && (String(telefono).includes('5576683884') || ADMIN_PHONE.includes(String(telLimpio).slice(-10)))) {
       const total = await Usuario.countDocuments();
       if (total === 0) { await enviarMensaje(telefono, 'No hay usuarios.'); return; }
       const ultimos = await Usuario.find().sort({ fechaRegistro: -1 }).limit(10);
@@ -556,7 +556,9 @@ async function procesarMensaje(telefono, mensaje) {
     const esAdmin = (
       String(telefono).includes('5576683884') ||
       String(telLimpio).includes('5576683884') ||
-      telefono === ADMIN_PHONE
+      telefono === ADMIN_PHONE ||
+      String(telefono).replace('521', '52').includes(ADMIN_PHONE) ||
+      ADMIN_PHONE.includes(String(telLimpio).slice(-10))
     );
 
     if (esAdmin) {
@@ -718,10 +720,12 @@ app.post('/webhook', async function(req, res) {
       var key = messages.key || {};
       fromMe = key.fromMe || false;
       if (fromMe) return;
-      telefono = messages.cleanedSenderPn || messages.senderPn || key.remoteJid || null;
+      // El teléfono limpio está en key.cleanedSenderPn según el JSON real
+      telefono = key.cleanedSenderPn || key.senderPn || messages.cleanedSenderPn || messages.senderPn || key.remoteJid || null;
       var msgContent = messages.message || {};
       mensaje = msgContent.conversation ||
                 (msgContent.extendedTextMessage && msgContent.extendedTextMessage.text) ||
+                messages.messageBody ||
                 messages.body || messages.text || null;
       console.log('Tel: ' + telefono + ' | Msg: ' + mensaje);
     }
