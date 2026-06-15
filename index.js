@@ -71,10 +71,16 @@ const contadorSchema = new mongoose.Schema({
 const Contador = mongoose.model('Contador', contadorSchema);
 
 async function obtenerSiguienteContador() {
+  // Si no existe, lo crea con valor 109 antes de incrementar
+  await Contador.findOneAndUpdate(
+    { nombre: 'usuarios' },
+    { $setOnInsert: { valor: 109 } },
+    { upsert: true, new: true }
+  );
   const contador = await Contador.findOneAndUpdate(
     { nombre: 'usuarios' },
     { $inc: { valor: 1 } },
-    { upsert: true, new: true }
+    { new: true }
   );
   return contador.valor;
 }
@@ -283,8 +289,9 @@ async function procesarMensaje(telefono, mensaje) {
     if (texto === 'RESETBD' && esSuperAdmin) {
       await Usuario.deleteMany({});
       await Contador.deleteMany({});
+      await Contador.create({ nombre: 'usuarios', valor: 109 });
       Object.keys(sesiones).forEach(k => delete sesiones[k]);
-      await enviarMensaje(telefono, '✅ Base de datos limpiada. Contador reiniciado en DESP-000112.');
+      await enviarMensaje(telefono, '✅ Base de datos limpiada. Contador reiniciado en DESP-000110.');
       return;
     }
 
@@ -577,8 +584,9 @@ async function procesarMensaje(telefono, mensaje) {
       if (texto === 'RESETBD') {
         await Usuario.deleteMany({});
         await Contador.deleteMany({});
+        await Contador.create({ nombre: 'usuarios', valor: 109 });
         Object.keys(sesiones).forEach(k => delete sesiones[k]);
-        await enviarMensaje(telefono, '✅ Base de datos limpiada. Contador reiniciado en DESP-000112.');
+        await enviarMensaje(telefono, '✅ Base de datos limpiada. Contador reiniciado en DESP-000110.');
         return;
       }
 
@@ -769,6 +777,7 @@ app.get('/admin/resetbd', async function(req, res) {
   try {
     await Usuario.deleteMany({});
     await Contador.deleteMany({});
+    await Contador.create({ nombre: 'usuarios', valor: 109 });
     Object.keys(sesiones).forEach(k => delete sesiones[k]);
     res.send('✅ Base de datos limpiada. Contador reiniciado en DESP-000110.');
   } catch (err) {
