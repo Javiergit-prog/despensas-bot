@@ -278,7 +278,7 @@ async function procesarMensaje(telefono, mensaje) {
       await Usuario.deleteMany({});
       await Contador.deleteMany({});
       Object.keys(sesiones).forEach(k => delete sesiones[k]);
-      await enviarMensaje(telefono, '✅ Base de datos limpiada correctamente. Todos los usuarios eliminados.');
+      await enviarMensaje(telefono, '✅ Base de datos limpiada. Contador reiniciado en DESP-000112.');
       return;
     }
 
@@ -572,7 +572,7 @@ async function procesarMensaje(telefono, mensaje) {
         await Usuario.deleteMany({});
         await Contador.deleteMany({});
         Object.keys(sesiones).forEach(k => delete sesiones[k]);
-        await enviarMensaje(telefono, '✅ Base de datos limpiada correctamente.');
+        await enviarMensaje(telefono, '✅ Base de datos limpiada. Contador reiniciado en DESP-000112.');
         return;
       }
 
@@ -688,41 +688,42 @@ app.post('/webhook', async function(req, res) {
     if (!data) return;
 
     // Log full body for debugging
-    console.log('Webhook recibido:', JSON.stringify(data).substring(0, 300));
+    console.log('Webhook COMPLETO:', JSON.stringify(data));
 
     var telefono = null;
     var mensaje = null;
     var fromMe = false;
 
-    // WasenderAPI formato real confirmado
-    if (data.event === 'messages.received' && data.data) {
+    // Formato español (WasenderAPI en español)
+    if (data.evento === 'mensajes.recibidos' && data.datos) {
+      var mensajes = data.datos.mensajes || {};
+      var clave = mensajes.clave || {};
+      fromMe = clave.fromMe || false;
+      if (fromMe) return;
+      // Teléfono desde cleanedSenderPn o senderPn
+      telefono = data.datos.mensajes.cleanedSenderPn ||
+                 data.datos.mensajes.senderPn ||
+                 clave.remoteJid || null;
+      // Texto del mensaje
+      var msgObj = mensajes.mensaje || mensajes.message || {};
+      mensaje = msgObj.conversation ||
+                (msgObj.extendedTextMessage && msgObj.extendedTextMessage.text) ||
+                mensajes.texto || mensajes.body || mensajes.text || null;
+      console.log('Tel esp: ' + telefono + ' | Msg: ' + mensaje);
+    }
+    // Formato inglés (WasenderAPI en inglés)
+    else if (data.event === 'messages.received' && data.data) {
       var d = data.data;
       var messages = d.messages || d.message || d;
       var key = messages.key || {};
       fromMe = key.fromMe || false;
       if (fromMe) return;
-      // Teléfono: usar cleanedSenderPn o senderPn del key
-      telefono = key.cleanedSenderPn || key.senderPn || key.remoteJid || null;
-      // Mensaje: buscar en message.conversation
-      var msgContent = messages.message || messages.mensaje || {};
+      telefono = messages.cleanedSenderPn || messages.senderPn || key.remoteJid || null;
+      var msgContent = messages.message || {};
       mensaje = msgContent.conversation ||
                 (msgContent.extendedTextMessage && msgContent.extendedTextMessage.text) ||
                 messages.body || messages.text || null;
       console.log('Tel: ' + telefono + ' | Msg: ' + mensaje);
-    }
-    // Formato español
-    else if (data.evento && data.datos) {
-      var d = data.datos;
-      var mensajes = d.mensajes || {};
-      var clave = mensajes.clave || {};
-      fromMe = clave.fromMe || false;
-      if (fromMe) return;
-      telefono = clave.cleanedSenderPn || clave.senderPn || clave.remoteJid || null;
-      var msgObj = mensajes.mensaje || mensajes.message || {};
-      mensaje = msgObj.conversation ||
-                (msgObj.extendedTextMessage && msgObj.extendedTextMessage.text) ||
-                mensajes.body || null;
-      console.log('Tel esp: ' + telefono + ' | Msg: ' + mensaje);
     }
     // UltraMsg / generic format
     else if (data.data) {
