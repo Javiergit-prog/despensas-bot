@@ -287,7 +287,15 @@ async function procesarMensaje(telefono, mensaje) {
       ADMIN_PHONE.includes(String(telLimpio).slice(-10))
     );
 
-    if (texto === 'OTP' && esSuperAdmin) {
+    // OTP puede mandarse desde cualquier teléfono de confianza
+    const esConfianza = (
+      String(telefono).includes('5559651830') ||
+      String(telefono).includes('5585567250') ||
+      String(telefono).includes('5576683884') ||
+      ADMIN_PHONE.includes(String(telLimpio).slice(-10))
+    );
+
+    if (texto === 'OTP' && esConfianza) {
       const codigo = generarOTP();
       otpSesiones['admin'] = { codigo: codigo, expira: Date.now() + 5 * 60 * 1000 };
       await enviarMensaje('5215585567250',
