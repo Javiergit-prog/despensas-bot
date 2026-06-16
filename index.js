@@ -349,8 +349,36 @@ async function procesarMensaje(telefono, mensaje) {
 
     // ── REGISTRO PASO 2 - NOMBRE
     if (sesion.paso === 'pedir_nombre') {
-      sesiones[telefono] = { paso: 'pedir_referido', datos: { nombre: texto } };
-      await enviarMensaje(telefono, '👍 Gracias *' + texto + '*.\n\n¿Tienes un codigo de quien te invito?\n(Ejemplo: DESP-000001)\n\nSi no tienes codigo escribe *NO*');
+      // Corrección automática del nombre
+      const nombreCorregido = texto
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toLowerCase()
+        .replace(/(?:^|\s)\S/g, l => l.toUpperCase());
+
+      // Antifraude: bloquear nombre duplicado o muy similar
+      const todosUsuarios = await Usuario.find({}, 'nombre id');
+      const nombreLimpio = nombreCorregido.toLowerCase().replace(/\s/g, '');
+      const duplicadoNombre = todosUsuarios.find(u => {
+        const uNombre = u.nombre.toLowerCase().replace(/\s/g, '');
+        const coincidencias = [...nombreLimpio].filter(c => uNombre.includes(c)).length;
+        const similitud = coincidencias / Math.max(nombreLimpio.length, uNombre.length);
+        return similitud > 0.85 && uNombre.length > 4;
+      });
+
+      if (duplicadoNombre) {
+        delete sesiones[telefono];
+        await enviarMensaje(telefono,
+          '⛔ *REGISTRO NO PERMITIDO*\n\n' +
+          'Ya existe un usuario registrado con ese nombre.\n\n' +
+          'Si crees que es un error contacta al administrador:\n' +
+          'https://wa.me/525576683884'
+        );
+        return;
+      }
+
+      sesiones[telefono] = { paso: 'pedir_referido', datos: { nombre: nombreCorregido } };
+      await enviarMensaje(telefono, '👍 Gracias *' + nombreCorregido + '*.\n\n¿Tienes un codigo de quien te invito?\n(Ejemplo: DESP-000001)\n\nSi no tienes codigo escribe *NO*');
       return;
     }
 
@@ -437,7 +465,7 @@ async function procesarMensaje(telefono, mensaje) {
       const referidoTexto = referidoPor ? referidoPor : 'Ninguno';
       const fechaHoy = new Date().toLocaleDateString('es-MX');
 
-      await enviarMensaje(ADMIN_PHONE,
+      await enviarMensaje('5215585567250',
         '🆕 *NUEVO USUARIO REGISTRADO*\n\n' +
         '👤 Nombre: ' + nuevoUsuario.nombre + '\n' +
         '🪪 ID: ' + nuevoID + '\n' +
