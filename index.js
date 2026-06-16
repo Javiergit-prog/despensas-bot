@@ -820,6 +820,119 @@ app.post('/webhook', async function(req, res) {
   }
 });
 
+app.get('/admin/arbol', async function(req, res) {
+  if (req.query.key !== 'despensas2026') {
+    return res.status(403).send('Acceso denegado');
+  }
+  try {
+    const usuarios = await Usuario.find({}).lean();
+
+    const COLORES_HEX = {
+      0: { bg: '#7B2FBE', text: '#fff', nombre: 'VIOLETA' },
+      1: { bg: '#F5A623', text: '#000', nombre: 'DORADO' },
+      2: { bg: '#2196F3', text: '#fff', nombre: 'AZUL' },
+      3: { bg: '#FF6B2B', text: '#fff', nombre: 'NARANJA' },
+      4: { bg: '#E91E8C', text: '#fff', nombre: 'ROSA' },
+      5: { bg: '#4CAF50', text: '#fff', nombre: 'VERDE' },
+      6: { bg: '#FFC107', text: '#000', nombre: 'AMARILLO' },
+      7: { bg: '#00BCD4', text: '#000', nombre: 'TURQUESA' },
+      8: { bg: '#1B5E20', text: '#fff', nombre: 'VERDE BANDERA' },
+      9: { bg: '#9E9E9E', text: '#fff', nombre: 'GRIS' }
+    };
+
+    function buildNodo(usuario, todos) {
+      const color = COLORES_HEX[usuario.nivel || 0] || COLORES_HEX[0];
+      const referidos = todos.filter(u => u.referidoPor === usuario.id);
+      const refsHTML = referidos.map(r => buildNodo(r, todos)).join('');
+      return `
+        <div class="nodo-wrap">
+          <div class="nodo" style="background:${color.bg};color:${color.text}">
+            <div class="nodo-id">${usuario.id}</div>
+            <div class="nodo-nombre">${usuario.nombre}</div>
+            <div class="nodo-nivel">Nv.${usuario.nivel||0} — ${color.nombre}</div>
+            <div class="nodo-refs">${usuario.referidos ? usuario.referidos.length : 0}/4 referidos</div>
+            <div class="nodo-estado">${usuario.activo ? '✅ Activo' : '❌ Inactivo'}</div>
+          </div>
+          ${refsHTML ? `<div class="hijos">${refsHTML}</div>` : ''}
+        </div>`;
+    }
+
+    const raices = usuarios.filter(u => !u.referidoPor);
+    const arbolHTML = raices.map(u => buildNodo(u, usuarios)).join('');
+
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>🛒 DespensaClub — Árbol Jerárquico</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #1a1a2e; color: #fff; padding: 20px; min-height: 100vh; }
+    h1 { text-align: center; color: #25D366; margin-bottom: 5px; font-size: 22px; }
+    .subtitulo { text-align: center; color: #aaa; font-size: 13px; margin-bottom: 25px; }
+    .stats { display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; margin-bottom: 25px; }
+    .stat { background: #16213e; border-radius: 10px; padding: 10px 20px; text-align: center; }
+    .stat-num { font-size: 24px; font-weight: bold; color: #25D366; }
+    .stat-label { font-size: 11px; color: #aaa; }
+    .arbol { overflow-x: auto; padding-bottom: 20px; }
+    .nodo-wrap { display: inline-flex; flex-direction: column; align-items: center; margin: 0 8px; }
+    .nodo { border-radius: 12px; padding: 10px 14px; min-width: 140px; max-width: 160px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.4); margin-bottom: 8px; cursor: default; transition: transform 0.2s; }
+    .nodo:hover { transform: scale(1.05); }
+    .nodo-id { font-size: 11px; opacity: 0.8; margin-bottom: 3px; }
+    .nodo-nombre { font-size: 13px; font-weight: bold; margin-bottom: 3px; word-break: break-word; }
+    .nodo-nivel { font-size: 10px; opacity: 0.85; margin-bottom: 3px; }
+    .nodo-refs { font-size: 11px; opacity: 0.8; }
+    .nodo-estado { font-size: 10px; margin-top: 3px; }
+    .hijos { display: flex; flex-direction: row; align-items: flex-start; justify-content: center; border-top: 2px solid #444; padding-top: 8px; margin-top: 0; position: relative; }
+    .hijos::before { content: ''; position: absolute; top: 0; left: 50%; width: 2px; height: 8px; background: #444; }
+    .vacio { text-align: center; color: #666; margin-top: 60px; font-size: 18px; }
+    .leyenda { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 25px; }
+    .leyenda-item { border-radius: 20px; padding: 4px 12px; font-size: 11px; font-weight: bold; }
+    .btn-refresh { display: block; margin: 20px auto 0; padding: 10px 25px; background: #25D366; color: #000; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>🛒 DespensaClub Familiar</h1>
+  <p class="subtitulo">Árbol Jerárquico de Usuarios</p>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-num">${usuarios.length}</div>
+      <div class="stat-label">Total usuarios</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">${usuarios.filter(u => u.activo).length}</div>
+      <div class="stat-label">Activos</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">${raices.length}</div>
+      <div class="stat-label">Raíces</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">${Math.max(...usuarios.map(u => u.nivel || 0), 0)}</div>
+      <div class="stat-label">Nivel máximo</div>
+    </div>
+  </div>
+
+  <div class="leyenda">
+    ${Object.entries(COLORES_HEX).map(([n, c]) =>
+      `<span class="leyenda-item" style="background:${c.bg};color:${c.text}">Nv.${n} ${c.nombre}</span>`
+    ).join('')}
+  </div>
+
+  <div class="arbol">
+    ${arbolHTML || '<div class="vacio">😴 No hay usuarios registrados aún.</div>'}
+  </div>
+
+  <button class="btn-refresh" onclick="location.reload()">🔄 Actualizar</button>
+</body>
+</html>`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
 app.get('/admin/login', function(req, res) {
   const otp = req.query.otp;
   const tel = req.query.tel || '5576683884';
@@ -846,6 +959,7 @@ app.get('/admin/login', function(req, res) {
         <h2>✅ Acceso autorizado</h2>
         <p>Bienvenido al panel de administración DespensaClub.</p>
         <p><a href="/admin/lista?key=despensas2026">📋 Ver lista de usuarios</a></p>
+        <p><a href="/admin/arbol?key=despensas2026">🌳 Ver árbol jerárquico</a></p>
         <p><a href="/admin/respaldo?key=despensas2026">📦 Enviar respaldo</a></p>
         <p><a href="/admin/resetbd?key=despensas2026">🗑️ Reset base de datos</a></p>
       </body></html>
