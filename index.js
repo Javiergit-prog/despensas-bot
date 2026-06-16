@@ -244,6 +244,11 @@ async function enviarRecordatorios() {
     const dia = hoy.getDate();
     const usuarios = await Usuario.find({ activo: true });
 
+    // Día 1 — generar lista mensual de despensas
+    if (dia === 1) {
+      await generarListaMensual();
+    }
+
     for (const u of usuarios) {
       // Recordatorio día 1 de cada mes — usuarios sin pago del mes actual
       if (dia === 1) {
@@ -407,6 +412,55 @@ function iniciarCongelamiento() {
     verificarCongelamiento();
     setInterval(verificarCongelamiento, 24 * 60 * 60 * 1000);
   }, tiempoEspera);
+}
+
+// ============================================================
+// LISTA MENSUAL DE DESPENSAS
+// ============================================================
+async function generarListaMensual() {
+  try {
+    console.log('Generando lista mensual...');
+    const hoy = new Date();
+    const mes = hoy.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+    const usuarios = await Usuario.find({ activo: true, congelado: false }).sort({ nivel: 1, fechaRegistro: 1 });
+
+    if (usuarios.length === 0) {
+      await enviarMensaje('5215585567250', '📋 Lista mensual: No hay usuarios activos.');
+      return;
+    }
+
+    // Agrupar por nivel
+    const porNivel = {};
+    for (const u of usuarios) {
+      const nv = u.nivel || 0;
+      if (!porNivel[nv]) porNivel[nv] = [];
+      porNivel[nv].push(u);
+    }
+
+    let lista = '📋 *LISTA MENSUAL DE DESPENSAS*\n';
+    lista += '━━━━━━━━━━━━━━━━━━━━\n';
+    lista += '📅 ' + mes.toUpperCase() + '\n';
+    lista += '━━━━━━━━━━━━━━━━━━━━\n\n';
+
+    for (const nv of Object.keys(porNivel).sort()) {
+      const color = COLORES_NIVEL[nv] || 'VIOLETA';
+      lista += '🎨 *Nivel ' + nv + ' — ' + color + '*\n';
+      for (const u of porNivel[nv]) {
+        if (USUARIOS_EXENTOS.includes(u.id)) continue;
+        lista += '• ' + u.id + ' — ' + u.nombre + '\n';
+      }
+      lista += '\n';
+    }
+
+    lista += '━━━━━━━━━━━━━━━━━━━━\n';
+    lista += '👥 Total activos: *' + usuarios.filter(u => !USUARIOS_EXENTOS.includes(u.id)).length + '*\n';
+    lista += '_DespensaClub — Lista automática_';
+
+    await enviarMensaje('5215585567250', lista);
+    console.log('✅ Lista mensual enviada');
+  } catch (err) {
+    console.error('❌ Error generando lista mensual:', err.message);
+  }
 }
 
 // ============================================================
@@ -878,6 +932,13 @@ async function procesarMensaje(telefono, mensaje) {
     );
 
     if (esAdmin) {
+
+      if (texto === 'LISTA MENSUAL' || texto === 'LISTAMENSUAL') {
+        await enviarMensaje(telefono, '📋 Generando lista mensual...');
+        await generarListaMensual();
+        await enviarMensaje(telefono, '✅ Lista enviada al 5585567250.');
+        return;
+      }
 
       if (texto === 'VERIFICAR') {
         await enviarMensaje(telefono, '❄️ Verificando congelamientos...');
