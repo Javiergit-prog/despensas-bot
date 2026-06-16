@@ -475,13 +475,14 @@ async function procesarMensaje(telefono, mensaje) {
         '📅 Fecha: ' + fechaHoy
       );
 
-      // Enviar credencial digital al usuario
+      // Enviar link de credencial digital al usuario
       await new Promise(r => setTimeout(r, 2000));
-      await enviarCredencial(telefono, nuevoUsuario);
-
-      // Enviar credencial al admin
-      await new Promise(r => setTimeout(r, 2000));
-      await enviarCredencial(ADMIN_PHONE, nuevoUsuario);
+      await enviarMensaje(telefono,
+        '🪪 *TU CREDENCIAL DIGITAL*\n\n' +
+        'Accede a tu credencial aquí:\n' +
+        'https://despensas-bot-production.up.railway.app/credencial/' + nuevoID + '\n\n' +
+        '📱 Ábrela desde tu celular o computadora e imprímela.'
+      );
 
       return;
     }
@@ -817,6 +818,142 @@ app.post('/webhook', async function(req, res) {
     await procesarMensaje(telefono, mensaje);
   } catch (err) {
     console.error('Error en webhook:', err.message);
+  }
+});
+
+app.get('/credencial/:id', async function(req, res) {
+  try {
+    const usuario = await Usuario.findOne({ id: req.params.id.toUpperCase() });
+    if (!usuario) return res.status(404).send('Credencial no encontrada.');
+
+    const COLORES_HEX = {
+      0: { bg: '#7B2FBE', text: '#fff', nombre: 'VIOLETA' },
+      1: { bg: '#F5A623', text: '#000', nombre: 'DORADO' },
+      2: { bg: '#2196F3', text: '#fff', nombre: 'AZUL' },
+      3: { bg: '#FF6B2B', text: '#fff', nombre: 'NARANJA' },
+      4: { bg: '#E91E8C', text: '#fff', nombre: 'ROSA' },
+      5: { bg: '#4CAF50', text: '#fff', nombre: 'VERDE' },
+      6: { bg: '#FFC107', text: '#000', nombre: 'AMARILLO' },
+      7: { bg: '#00BCD4', text: '#000', nombre: 'TURQUESA' },
+      8: { bg: '#1B5E20', text: '#fff', nombre: 'VERDE BANDERA' },
+      9: { bg: '#9E9E9E', text: '#fff', nombre: 'GRIS' }
+    };
+
+    const color = COLORES_HEX[usuario.nivel || 0] || COLORES_HEX[0];
+    const fechaReg = new Date(usuario.fechaRegistro).toLocaleDateString('es-MX');
+    const vigencia = usuario.vigencia ? new Date(usuario.vigencia).toLocaleDateString('es-MX') : 'N/A';
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${usuario.id}&color=${color.bg.replace('#','')}`;
+
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Credencial — ${usuario.id}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #f0f0f0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: 'Arial', sans-serif; padding: 20px; }
+    .credencial {
+      width: 340px;
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+      background: #fff;
+    }
+    .header {
+      background: ${color.bg};
+      color: ${color.text};
+      padding: 18px 20px 14px;
+      text-align: center;
+    }
+    .header-logo { font-size: 28px; margin-bottom: 2px; }
+    .header-title { font-size: 16px; font-weight: bold; letter-spacing: 1px; }
+    .header-sub { font-size: 11px; opacity: 0.85; margin-top: 2px; }
+    .nivel-badge {
+      background: rgba(255,255,255,0.25);
+      border-radius: 20px;
+      padding: 3px 14px;
+      font-size: 11px;
+      font-weight: bold;
+      display: inline-block;
+      margin-top: 8px;
+      letter-spacing: 2px;
+    }
+    .body { padding: 18px 20px; }
+    .nombre { font-size: 17px; font-weight: bold; color: #222; text-align: center; margin-bottom: 4px; }
+    .id { font-size: 13px; color: #666; text-align: center; margin-bottom: 14px; letter-spacing: 1px; }
+    .divider { border: none; border-top: 1px solid #eee; margin: 10px 0; }
+    .fila { display: flex; justify-content: space-between; margin-bottom: 7px; }
+    .fila-label { font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.5px; }
+    .fila-valor { font-size: 12px; color: #333; font-weight: bold; }
+    .qr-section { display: flex; justify-content: center; margin: 14px 0 8px; }
+    .qr-section img { border-radius: 8px; border: 3px solid ${color.bg}; }
+    .footer {
+      background: ${color.bg};
+      color: ${color.text};
+      text-align: center;
+      padding: 10px;
+      font-size: 10px;
+      opacity: 0.9;
+    }
+    .btn-imprimir {
+      margin-top: 20px;
+      padding: 12px 30px;
+      background: ${color.bg};
+      color: ${color.text};
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    @media print {
+      body { background: white; }
+      .btn-imprimir { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="credencial">
+    <div class="header">
+      <div class="header-logo">🛒</div>
+      <div class="header-title">DESPENSACLUB FAMILIAR</div>
+      <div class="header-sub">Red de Consumo Inteligente</div>
+      <div class="nivel-badge">NIVEL ${usuario.nivel || 0} — ${color.nombre}</div>
+    </div>
+    <div class="body">
+      <div class="nombre">${usuario.nombre.toUpperCase()}</div>
+      <div class="id">${usuario.id}</div>
+      <hr class="divider">
+      <div class="fila">
+        <span class="fila-label">📅 Registro</span>
+        <span class="fila-valor">${fechaReg}</span>
+      </div>
+      <div class="fila">
+        <span class="fila-label">⏳ Vigencia</span>
+        <span class="fila-valor">${vigencia}</span>
+      </div>
+      <div class="fila">
+        <span class="fila-label">👥 Referidos</span>
+        <span class="fila-valor">${usuario.referidos ? usuario.referidos.length : 0}/4</span>
+      </div>
+      <div class="fila">
+        <span class="fila-label">✅ Estado</span>
+        <span class="fila-valor">${usuario.activo ? 'Activo' : 'Inactivo'}</span>
+      </div>
+      <div class="qr-section">
+        <img src="${qrUrl}" width="120" height="120" alt="QR">
+      </div>
+    </div>
+    <div class="footer">
+      Escanea el QR para verificar esta credencial • DespensaClub 2026
+    </div>
+  </div>
+  <button class="btn-imprimir" onclick="window.print()">🖨️ Imprimir credencial</button>
+</body>
+</html>`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
   }
 });
 
