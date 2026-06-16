@@ -233,6 +233,83 @@ function iniciarRespaldoDiario() {
 }
 
 // ============================================================
+// RECORDATORIOS AUTOMÁTICOS DE PAGO
+// ============================================================
+async function enviarRecordatorios() {
+  try {
+    console.log('Verificando recordatorios...');
+    const hoy = new Date();
+    const dia = hoy.getDate();
+    const usuarios = await Usuario.find({ activo: true });
+
+    for (const u of usuarios) {
+      // Recordatorio día 1 de cada mes — usuarios sin pago del mes actual
+      if (dia === 1) {
+        const mesActual = hoy.getMonth();
+        const anioActual = hoy.getFullYear();
+        const pagosEsteMes = u.pagos ? u.pagos.filter(p => {
+          const fechaPago = new Date(p.fecha);
+          return p.estado === 'confirmado' &&
+                 p.concepto === 'Despensa mensual' &&
+                 fechaPago.getMonth() === mesActual &&
+                 fechaPago.getFullYear() === anioActual;
+        }) : [];
+
+        if (pagosEsteMes.length === 0) {
+          await enviarMensaje(u.telefono,
+            '📅 *RECORDATORIO DE PAGO*\n\n' +
+            'Hola *' + u.nombre + '* 👋\n\n' +
+            'Recuerda que este mes aún no hemos recibido tu pago de despensa.\n\n' +
+            '💵 Despensa mensual: *$250 pesos*\n\n' +
+            'Para registrar tu pago escribe *MENU* y elige la opción *4*.\n\n' +
+            '¡Gracias por ser parte de DespensaClub! 🛒'
+          );
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+
+      // Recordatorio 30 días antes del vencimiento de membresía
+      if (u.vigencia) {
+        const vigencia = new Date(u.vigencia);
+        const diasRestantes = Math.ceil((vigencia - hoy) / (1000 * 60 * 60 * 24));
+
+        if (diasRestantes === 30 || diasRestantes === 7 || diasRestantes === 1) {
+          await enviarMensaje(u.telefono,
+            '⚠️ *TU MEMBRESÍA ESTÁ POR VENCER*\n\n' +
+            'Hola *' + u.nombre + '* 👋\n\n' +
+            'Tu membresía anual vence en *' + diasRestantes + ' día(s)*.\n' +
+            '📅 Vencimiento: ' + vigencia.toLocaleDateString('es-MX') + '\n\n' +
+            '💵 Renovación: *$50 pesos*\n\n' +
+            'Para renovar escribe *MENU* y elige la opción *4*.\n\n' +
+            'No pierdas tu lugar en DespensaClub 🛒'
+          );
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+    }
+    console.log('✅ Recordatorios enviados');
+  } catch (err) {
+    console.error('❌ Error enviando recordatorios:', err.message);
+  }
+}
+
+// Ejecutar recordatorios diario a las 9 AM hora Mexico (3 PM UTC)
+function iniciarRecordatorios() {
+  var ahora = new Date();
+  var proximaEjecucion = new Date();
+  proximaEjecucion.setUTCHours(15, 0, 0, 0); // 9 AM Mexico = 3 PM UTC
+  if (proximaEjecucion <= ahora) {
+    proximaEjecucion.setDate(proximaEjecucion.getDate() + 1);
+  }
+  var tiempoEspera = proximaEjecucion - ahora;
+  console.log('Próximos recordatorios en ' + Math.round(tiempoEspera/1000/60) + ' minutos');
+  setTimeout(function() {
+    enviarRecordatorios();
+    setInterval(enviarRecordatorios, 24 * 60 * 60 * 1000);
+  }, tiempoEspera);
+}
+
+// ============================================================
 // SISTEMA OTP — LOGIN SEGURO ADMIN
 // ============================================================
 const otpSesiones = {}; // { telefono: { codigo, expira } }
@@ -701,6 +778,13 @@ async function procesarMensaje(telefono, mensaje) {
     );
 
     if (esAdmin) {
+
+      if (texto === 'RECORDATORIOS') {
+        await enviarMensaje(telefono, '📅 Enviando recordatorios...');
+        await enviarRecordatorios();
+        await enviarMensaje(telefono, '✅ Recordatorios enviados.');
+        return;
+      }
 
       if (texto === 'RESPALDO') {
         await enviarMensaje(telefono, '📧 Enviando respaldo a tu correo...');
@@ -1327,4 +1411,6 @@ setTimeout(verificarConexionWhatsApp, 30 * 1000);
 const PORT = process.env.PORT || process.env.RAILWAY_TCP_PROXY_PORT || 3000;
 app.listen(PORT, '0.0.0.0', function() {
   console.log('Bot corriendo en puerto ' + PORT);
+  iniciarRespaldoDiario();
+  iniciarRecordatorios();
 });
