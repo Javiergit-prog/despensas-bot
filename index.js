@@ -591,8 +591,14 @@ async function procesarMensaje(telefono, mensaje) {
     }
 
     if (sesion.paso === 'esperar_comprobante') {
-      // Detectar si mandó imagen
       const { concepto, monto } = sesion.datos;
+
+      // Verificar que mandó imagen
+      if (texto !== '__IMAGEN__') {
+        await enviarMensaje(telefono, '📸 Por favor envía una *foto o imagen* de tu comprobante de pago.');
+        return;
+      }
+
       const fecha = new Date();
 
       await Usuario.updateOne(
@@ -822,6 +828,12 @@ app.post('/webhook', async function(req, res) {
                 (msgContent.extendedTextMessage && msgContent.extendedTextMessage.text) ||
                 messages.messageBody ||
                 messages.body || messages.text || null;
+
+      // Detectar si es imagen (comprobante)
+      if (!mensaje && (msgContent.imageMessage || msgContent.documentMessage)) {
+        mensaje = '__IMAGEN__';
+      }
+
       console.log('Tel: ' + telefono + ' | Msg: ' + mensaje);
     }
     // UltraMsg / generic format
