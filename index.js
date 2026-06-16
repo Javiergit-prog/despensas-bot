@@ -1433,6 +1433,245 @@ app.get('/credencial/:id', async function(req, res) {
   }
 });
 
+app.get('/admin/usuarios', async function(req, res) {
+  if (req.query.key !== 'despensas2026') {
+    return res.status(403).send('Acceso denegado');
+  }
+  try {
+    const { filtro, nivel, estado } = req.query;
+    let query = {};
+    if (estado === 'activo') query = { activo: true, congelado: false };
+    else if (estado === 'congelado') query = { congelado: true };
+    else if (estado === 'inactivo') query = { activo: false, congelado: false };
+    if (nivel !== undefined && nivel !== '') query.nivel = parseInt(nivel);
+
+    const usuarios = await Usuario.find(query).sort({ nivel: 1, fechaRegistro: 1 }).lean();
+
+    const COLORES_HEX = {
+      0: '#7B2FBE', 1: '#F5A623', 2: '#2196F3', 3: '#FF6B2B',
+      4: '#E91E8C', 5: '#4CAF50', 6: '#FFC107', 7: '#00BCD4',
+      8: '#1B5E20', 9: '#9E9E9E'
+    };
+
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Usuarios — DespensaClub</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #1a1a2e; color: #fff; padding: 16px; }
+    h1 { color: #25D366; font-size: 18px; margin-bottom: 4px; text-align: center; }
+    .sub { text-align: center; color: #aaa; font-size: 12px; margin-bottom: 16px; }
+    .filtros { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; justify-content: center; }
+    .filtros select { padding: 8px 12px; border-radius: 8px; border: none; background: #16213e; color: #fff; font-size: 13px; }
+    .filtros a { padding: 8px 16px; border-radius: 8px; background: #25D366; color: #000; text-decoration: none; font-size: 13px; font-weight: bold; }
+    .total { text-align: center; color: #aaa; font-size: 12px; margin-bottom: 12px; }
+    .usuario { background: #16213e; border-radius: 12px; padding: 14px; margin-bottom: 10px; }
+    .usuario-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .nivel-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+    .nombre { font-weight: bold; font-size: 14px; }
+    .id { font-size: 11px; color: #aaa; }
+    .datos { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; }
+    .dato { color: #aaa; }
+    .dato span { color: #fff; }
+    .badge { border-radius: 20px; padding: 2px 8px; font-size: 10px; font-weight: bold; margin-left: auto; }
+    .badge-activo { background: #1b5e20; color: #fff; }
+    .badge-congelado { background: #0d47a1; color: #fff; }
+    .badge-inactivo { background: #b71c1c; color: #fff; }
+    .pago-pendiente { color: #FFC107; font-size: 11px; margin-top: 6px; }
+    .btn-ver { display: inline-block; margin-top: 8px; padding: 5px 14px; background: #0f3460; border-radius: 6px; color: #fff; text-decoration: none; font-size: 11px; }
+    .vacio { text-align: center; color: #666; margin-top: 40px; }
+    .back { display: block; text-align: center; margin-top: 16px; color: #25D366; text-decoration: none; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>👥 Gestión de Usuarios</h1>
+  <p class="sub">DespensaClub Familiar</p>
+
+  <form method="GET">
+    <input type="hidden" name="key" value="despensas2026">
+    <div class="filtros">
+      <select name="estado" onchange="this.form.submit()">
+        <option value="">Todos los estados</option>
+        <option value="activo" ${estado === 'activo' ? 'selected' : ''}>✅ Activos</option>
+        <option value="congelado" ${estado === 'congelado' ? 'selected' : ''}>❄️ Congelados</option>
+        <option value="inactivo" ${estado === 'inactivo' ? 'selected' : ''}>❌ Inactivos</option>
+      </select>
+      <select name="nivel" onchange="this.form.submit()">
+        <option value="">Todos los niveles</option>
+        ${[0,1,2,3,4,5,6,7,8,9].map(n => `<option value="${n}" ${nivel == n ? 'selected' : ''}>Nivel ${n}</option>`).join('')}
+      </select>
+    </div>
+  </form>
+
+  <p class="total">${usuarios.length} usuario(s) encontrado(s)</p>
+
+  ${usuarios.length === 0 ? '<div class="vacio">😴 Sin resultados</div>' : usuarios.map(u => {
+    const color = COLORES_HEX[u.nivel || 0] || '#7B2FBE';
+    const vigenciaStr = u.vigencia ? new Date(u.vigencia).toLocaleDateString('es-MX') : 'N/A';
+    const pagosPend = u.pagos ? u.pagos.filter(p => p.estado === 'pendiente').length : 0;
+    const ultimoPago = u.pagos ? u.pagos.filter(p => p.estado === 'confirmado').pop() : null;
+    return `
+    <div class="usuario">
+      <div class="usuario-header">
+        <div class="nivel-dot" style="background:${color}"></div>
+        <div>
+          <div class="nombre">${u.nombre}</div>
+          <div class="id">${u.id}</div>
+        </div>
+        <span class="badge ${u.congelado ? 'badge-congelado' : u.activo ? 'badge-activo' : 'badge-inactivo'}">
+          ${u.congelado ? '❄️ Congelado' : u.activo ? '✅ Activo' : '❌ Inactivo'}
+        </span>
+      </div>
+      <div class="datos">
+        <div class="dato">📱 Tel: <span>${u.telefonoLimpio || 'N/A'}</span></div>
+        <div class="dato">🎨 Nivel: <span>${u.nivel || 0}</span></div>
+        <div class="dato">👥 Referidos: <span>${u.referidos ? u.referidos.length : 0}/4</span></div>
+        <div class="dato">⏳ Vigencia: <span>${vigenciaStr}</span></div>
+        <div class="dato">📅 Registro: <span>${new Date(u.fechaRegistro).toLocaleDateString('es-MX')}</span></div>
+        <div class="dato">💰 Último pago: <span>${ultimoPago ? '$' + ultimoPago.monto : 'Sin pagos'}</span></div>
+      </div>
+      ${pagosPend > 0 ? `<div class="pago-pendiente">⏳ ${pagosPend} pago(s) pendiente(s) de validar</div>` : ''}
+      <a class="btn-ver" href="/admin/usuario/${u.id}?key=despensas2026">Ver expediente completo →</a>
+    </div>`;
+  }).join('')}
+
+  <a class="back" href="/admin/dashboard?key=despensas2026">← Volver al Dashboard</a>
+</body>
+</html>`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// Vista detallada de usuario individual
+app.get('/admin/usuario/:id', async function(req, res) {
+  if (req.query.key !== 'despensas2026') {
+    return res.status(403).send('Acceso denegado');
+  }
+  try {
+    const u = await Usuario.findOne({ id: req.params.id.toUpperCase() }).lean();
+    if (!u) return res.status(404).send('Usuario no encontrado');
+
+    const COLORES_HEX = {
+      0: '#7B2FBE', 1: '#F5A623', 2: '#2196F3', 3: '#FF6B2B',
+      4: '#E91E8C', 5: '#4CAF50', 6: '#FFC107', 7: '#00BCD4',
+      8: '#1B5E20', 9: '#9E9E9E'
+    };
+    const color = COLORES_HEX[u.nivel || 0] || '#7B2FBE';
+    const vigenciaStr = u.vigencia ? new Date(u.vigencia).toLocaleDateString('es-MX') : 'N/A';
+
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${u.id} — Expediente</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #1a1a2e; color: #fff; padding: 16px; }
+    .header { background: ${color}; border-radius: 12px; padding: 16px; text-align: center; margin-bottom: 16px; }
+    .nombre { font-size: 18px; font-weight: bold; }
+    .id { font-size: 13px; opacity: 0.85; margin-top: 4px; }
+    .seccion { background: #16213e; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+    .seccion h3 { font-size: 13px; color: #25D366; margin-bottom: 10px; }
+    .fila { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #0f3460; font-size: 12px; }
+    .fila:last-child { border-bottom: none; }
+    .fila-label { color: #aaa; }
+    .pago-item { padding: 8px 0; border-bottom: 1px solid #0f3460; font-size: 12px; }
+    .pago-item:last-child { border-bottom: none; }
+    .estado-conf { color: #25D366; }
+    .estado-pend { color: #FFC107; }
+    .estado-rech { color: #f44336; }
+    .vacio { color: #666; font-size: 12px; }
+    .acciones { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+    .btn { padding: 10px; border-radius: 8px; text-align: center; font-size: 12px; font-weight: bold; text-decoration: none; display: block; }
+    .btn-confirmar { background: #1b5e20; color: #fff; }
+    .btn-desactivar { background: #b71c1c; color: #fff; }
+    .btn-activar { background: #0d47a1; color: #fff; }
+    .btn-cred { background: #7B2FBE; color: #fff; }
+    .back { display: block; text-align: center; margin-top: 16px; color: #25D366; text-decoration: none; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="nombre">${u.nombre.toUpperCase()}</div>
+    <div class="id">${u.id} — Nivel ${u.nivel || 0}</div>
+    <div style="margin-top:6px;font-size:12px">${u.congelado ? '❄️ Congelado' : u.activo ? '✅ Activo' : '❌ Inactivo'}</div>
+  </div>
+
+  <div class="acciones">
+    <a class="btn btn-cred" href="/credencial/${u.id}" target="_blank">🪪 Ver credencial</a>
+    ${u.activo ? `<a class="btn btn-desactivar" href="/admin/accion/${u.id}/desactivar?key=despensas2026">❌ Desactivar</a>` :
+                 `<a class="btn btn-activar" href="/admin/accion/${u.id}/activar?key=despensas2026">✅ Activar</a>`}
+  </div>
+
+  <div class="seccion">
+    <h3>📋 Datos personales</h3>
+    <div class="fila"><span class="fila-label">📱 Teléfono</span><span>${u.telefonoLimpio || 'N/A'}</span></div>
+    <div class="fila"><span class="fila-label">📅 Registro</span><span>${new Date(u.fechaRegistro).toLocaleDateString('es-MX')}</span></div>
+    <div class="fila"><span class="fila-label">⏳ Vigencia</span><span>${vigenciaStr}</span></div>
+    <div class="fila"><span class="fila-label">👥 Referido por</span><span>${u.referidoPor || 'Directo'}</span></div>
+    <div class="fila"><span class="fila-label">👥 Referidos</span><span>${u.referidos ? u.referidos.join(', ') || 'Ninguno' : 'Ninguno'}</span></div>
+  </div>
+
+  <div class="seccion">
+    <h3>💰 Historial de pagos</h3>
+    ${u.pagos && u.pagos.length > 0 ? [...u.pagos].reverse().map(p => `
+      <div class="pago-item">
+        <div class="${p.estado === 'confirmado' ? 'estado-conf' : p.estado === 'pendiente' ? 'estado-pend' : 'estado-rech'}">
+          ${p.estado === 'confirmado' ? '✅' : p.estado === 'pendiente' ? '⏳' : '❌'} ${p.estado.toUpperCase()}
+        </div>
+        <div>${p.concepto || 'Pago'} — $${p.monto} pesos</div>
+        <div style="color:#aaa">${new Date(p.fecha).toLocaleDateString('es-MX')}</div>
+      </div>
+    `).join('') : '<div class="vacio">Sin pagos registrados</div>'}
+  </div>
+
+  <div class="seccion">
+    <h3>📦 Historial de consumos</h3>
+    ${u.consumos && u.consumos.length > 0 ? [...u.consumos].reverse().map(c => `
+      <div class="pago-item">
+        <div>📦 ${c.descripcion || 'Despensa'}</div>
+        <div style="color:#aaa">${new Date(c.fecha).toLocaleDateString('es-MX')}</div>
+      </div>
+    `).join('') : '<div class="vacio">Sin consumos registrados</div>'}
+  </div>
+
+  <a class="back" href="/admin/usuarios?key=despensas2026">← Volver a lista</a>
+</body>
+</html>`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// Acciones rápidas sobre usuario
+app.get('/admin/accion/:id/:accion', async function(req, res) {
+  if (req.query.key !== 'despensas2026') {
+    return res.status(403).send('Acceso denegado');
+  }
+  try {
+    const { id, accion } = req.params;
+    const u = await Usuario.findOne({ id: id.toUpperCase() });
+    if (!u) return res.status(404).send('Usuario no encontrado');
+
+    if (accion === 'activar') {
+      await Usuario.updateOne({ id: u.id }, { activo: true, congelado: false });
+      await enviarMensaje(u.telefono, '✅ *Tu cuenta ha sido reactivada.*\n\nYa puedes usar todos los servicios de DespensaClub. 🛒');
+    } else if (accion === 'desactivar') {
+      await Usuario.updateOne({ id: u.id }, { activo: false });
+      await enviarMensaje(u.telefono, '⚠️ Tu cuenta ha sido suspendida.\nContacta al administrador: https://wa.me/525576683884');
+    }
+
+    res.redirect('/admin/usuario/' + u.id + '?key=despensas2026');
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
 app.get('/admin/dashboard', async function(req, res) {
   if (req.query.key !== 'despensas2026') {
     return res.status(403).send('Acceso denegado');
@@ -1583,6 +1822,8 @@ app.get('/admin/dashboard', async function(req, res) {
   </div>
 
   <div class="links">
+    <a class="btn" href="/admin/dashboard?key=despensas2026">📊 Dashboard</a>
+    <a class="btn" href="/admin/usuarios?key=despensas2026">👥 Usuarios</a>
     <a class="btn" href="/admin/arbol?key=despensas2026">🌳 Árbol</a>
     <a class="btn" href="/admin/lista?key=despensas2026">📋 Lista</a>
     <a class="btn" href="/admin/respaldo?key=despensas2026">📦 Respaldo</a>
