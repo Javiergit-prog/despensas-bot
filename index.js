@@ -249,6 +249,11 @@ async function enviarRecordatorios() {
       await generarListaMensual();
     }
 
+    // Día 30 — reporte mensual
+    if (dia === 30) {
+      await enviarReporteMensual();
+    }
+
     for (const u of usuarios) {
       // Recordatorio día 1 de cada mes — usuarios sin pago del mes actual
       if (dia === 1) {
@@ -460,6 +465,69 @@ async function generarListaMensual() {
     console.log('✅ Lista mensual enviada');
   } catch (err) {
     console.error('❌ Error generando lista mensual:', err.message);
+  }
+}
+
+// ============================================================
+// REPORTE MENSUAL AUTOMÁTICO
+// ============================================================
+async function enviarReporteMensual() {
+  try {
+    console.log('Generando reporte mensual...');
+    const hoy = new Date();
+    const mes = hoy.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+    const mesActual = hoy.getMonth();
+    const anioActual = hoy.getFullYear();
+
+    const todos = await Usuario.find({});
+    const activos = todos.filter(u => u.activo && !u.congelado);
+    const congelados = todos.filter(u => u.congelado);
+
+    // Pagos del mes
+    let ingresosMes = 0;
+    let pagosConfirmadosMes = 0;
+    for (const u of todos) {
+      const pagos = u.pagos ? u.pagos.filter(p => {
+        const fp = new Date(p.fecha);
+        return p.estado === 'confirmado' &&
+               fp.getMonth() === mesActual &&
+               fp.getFullYear() === anioActual;
+      }) : [];
+      pagosConfirmadosMes += pagos.length;
+      ingresosMes += pagos.reduce((s, p) => s + (p.monto || 0), 0);
+    }
+
+    // Consumos del mes
+    let consumosMes = 0;
+    for (const u of todos) {
+      const cons = u.consumos ? u.consumos.filter(c => {
+        const fc = new Date(c.fecha);
+        return fc.getMonth() === mesActual && fc.getFullYear() === anioActual;
+      }) : [];
+      consumosMes += cons.length;
+    }
+
+    const reporte =
+      '📊 *REPORTE MENSUAL DESPENSACLUB*\n' +
+      '━━━━━━━━━━━━━━━━━━━━\n' +
+      '📅 ' + mes.toUpperCase() + '\n' +
+      '━━━━━━━━━━━━━━━━━━━━\n\n' +
+      '👥 *USUARIOS*\n' +
+      '• Total registrados: *' + todos.length + '*\n' +
+      '• Activos: *' + activos.length + '*\n' +
+      '• Congelados: *' + congelados.length + '*\n\n' +
+      '💰 *PAGOS DEL MES*\n' +
+      '• Pagos confirmados: *' + pagosConfirmadosMes + '*\n' +
+      '• Ingresos totales: *$' + ingresosMes + ' pesos*\n\n' +
+      '📦 *CONSUMOS DEL MES*\n' +
+      '• Despensas entregadas: *' + consumosMes + '*\n\n' +
+      '━━━━━━━━━━━━━━━━━━━━\n' +
+      '_DespensaClub — Reporte automático mensual_';
+
+    await enviarMensaje('5215585567250', reporte);
+    console.log('✅ Reporte mensual enviado');
+  } catch (err) {
+    console.error('❌ Error generando reporte mensual:', err.message);
   }
 }
 
@@ -932,6 +1000,13 @@ async function procesarMensaje(telefono, mensaje) {
     );
 
     if (esAdmin) {
+
+      if (texto === 'REPORTE MENSUAL' || texto === 'REPORTEMENSUAL') {
+        await enviarMensaje(telefono, '📊 Generando reporte mensual...');
+        await enviarReporteMensual();
+        await enviarMensaje(telefono, '✅ Reporte enviado al 5585567250.');
+        return;
+      }
 
       if (texto === 'LISTA MENSUAL' || texto === 'LISTAMENSUAL') {
         await enviarMensaje(telefono, '📋 Generando lista mensual...');
