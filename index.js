@@ -561,38 +561,70 @@ async function procesarMensaje(telefono, mensaje) {
         await enviarMensaje(telefono, '❌ No tienes cuenta. Escribe MENU.');
         return;
       }
-      sesiones[telefono] = { paso: 'pedir_monto_pago', datos: {} };
+      sesiones[telefono] = { paso: 'pedir_tipo_pago', datos: {} };
       await enviarMensaje(telefono,
         '💰 *REGISTRAR PAGO*\n\n' +
-        '¿Cuanto vas a pagar? (solo el numero, ejemplo: *250*)\n\n' +
-        '📎 *IMPORTANTE:*\n' +
-        '1️⃣ Adjunta el *comprobante de tu pago* en este chat\n' +
-        '2️⃣ En la referencia de tu transferencia no olvides colocar tu *numero de ID* (ejemplo: DESP-000001)'
+        '¿Qué concepto vas a pagar?\n\n' +
+        '1️⃣ Membresía anual — *$50 pesos*\n' +
+        '2️⃣ Despensa mensual — *$250 pesos*\n\n' +
+        'Responde con *1* o *2*'
       );
       return;
     }
 
-    if (sesion.paso === 'pedir_monto_pago') {
-      const monto = parseFloat(texto);
-      if (isNaN(monto) || monto <= 0) {
-        await enviarMensaje(telefono, '❌ Escribe solo el numero. Ejemplo: 250');
+    if (sesion.paso === 'pedir_tipo_pago') {
+      if (texto !== '1' && texto !== '2') {
+        await enviarMensaje(telefono, '❌ Responde solo con *1* o *2*');
         return;
       }
+      const concepto = texto === '1' ? 'Membresía anual' : 'Despensa mensual';
+      const monto = texto === '1' ? 50 : 250;
+      sesiones[telefono] = { paso: 'esperar_comprobante', datos: { concepto, monto } };
+      await enviarMensaje(telefono,
+        '📸 *SUBE TU COMPROBANTE*\n\n' +
+        'Concepto: *' + concepto + '*\n' +
+        'Monto: *$' + monto + ' pesos*\n\n' +
+        'Ahora envía una *foto o captura* de tu comprobante de pago.\n\n' +
+        '⚠️ Asegúrate que se vea claramente el monto y la referencia.'
+      );
+      return;
+    }
+
+    if (sesion.paso === 'esperar_comprobante') {
+      // Detectar si mandó imagen
+      const { concepto, monto } = sesion.datos;
+      const fecha = new Date();
+
       await Usuario.updateOne(
         { telefono: telefono },
-        { $push: { pagos: { monto: monto, fecha: new Date(), estado: 'pendiente_confirmacion' } } }
+        { $push: { pagos: {
+          concepto: concepto,
+          monto: monto,
+          fecha: fecha,
+          estado: 'pendiente',
+          comprobante: 'enviado_por_whatsapp'
+        }}}
       );
       delete sesiones[telefono];
 
-      await enviarMensaje(telefono, '✅ *PAGO REGISTRADO*\n\nMonto: $' + monto + '\nEstado: Pendiente de confirmacion\n\nEl administrador confirmara tu pago en breve.');
-      await enviarMensaje(ADMIN_PHONE,
-        '💰 *PAGO PENDIENTE*\n\n' +
-        'Usuario: ' + usuarioExistente.nombre + '\n' +
-        'ID: ' + usuarioExistente.id + '\n' +
-        'Telefono: +' + telLimpio + '\n' +
-        'Monto: $' + monto + '\n' +
-        'Fecha: ' + new Date().toLocaleDateString('es-MX') + '\n\n' +
-        'Para confirmar escribe:\n*CONFIRMAR ' + usuarioExistente.id + '*'
+      await enviarMensaje(telefono,
+        '✅ *COMPROBANTE RECIBIDO*\n\n' +
+        'Concepto: *' + concepto + '*\n' +
+        'Monto: *$' + monto + ' pesos*\n' +
+        'Estado: ⏳ Pendiente de confirmación\n\n' +
+        'El administrador validará tu pago en breve y recibirás confirmación.'
+      );
+
+      await enviarMensaje('5215585567250',
+        '💰 *COMPROBANTE DE PAGO RECIBIDO*\n\n' +
+        '👤 ' + usuarioExistente.nombre + '\n' +
+        '🪪 ' + usuarioExistente.id + '\n' +
+        '📱 +' + telLimpio + '\n' +
+        '💵 Concepto: ' + concepto + '\n' +
+        '💵 Monto: $' + monto + ' pesos\n' +
+        '📅 ' + fecha.toLocaleDateString('es-MX') + '\n\n' +
+        'Para confirmar escribe:\n*CONFIRMAR ' + usuarioExistente.id + '*\n\n' +
+        'Para rechazar escribe:\n*RECHAZAR ' + usuarioExistente.id + '*'
       );
       return;
     }
