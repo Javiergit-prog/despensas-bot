@@ -916,22 +916,51 @@ async function procesarMensaje(telefono, mensaje) {
         const pagoIdx = userU.pagos.findLastIndex(function(p) { return p.estado === 'pendiente'; });
         if (pagoIdx === -1) { await enviarMensaje(telefono, '❌ No hay pagos pendientes para ' + idU); return; }
         userU.pagos[pagoIdx].estado = 'confirmado';
+
+        // Reactivar si estaba congelado
+        const estabaCongelado = userU.congelado || !userU.activo;
+        userU.congelado = false;
+        userU.activo = true;
+
+        // Si es membresía, actualizar vigencia
+        if (userU.pagos[pagoIdx].concepto === 'Membresía anual') {
+          const nuevaVigencia = new Date();
+          nuevaVigencia.setFullYear(nuevaVigencia.getFullYear() + 1);
+          userU.vigencia = nuevaVigencia;
+        }
+
         await userU.save();
         const pago = userU.pagos[pagoIdx];
+
         await enviarMensaje(telefono,
           '✅ *PAGO CONFIRMADO*\n\n' +
           '👤 ' + userU.nombre + '\n' +
           '🪪 ' + idU + '\n' +
-          '💵 ' + pago.concepto + ' — $' + pago.monto + ' pesos'
+          '💵 ' + pago.concepto + ' — $' + pago.monto + ' pesos' +
+          (estabaCongelado ? '\n\n❄️➡️✅ Cuenta reactivada automáticamente.' : '')
         );
+
         await enviarMensaje(userU.telefono,
           '✅ *TU PAGO FUE CONFIRMADO*\n\n' +
           'Hola *' + userU.nombre + '*\n\n' +
           '💵 Concepto: ' + pago.concepto + '\n' +
           '💵 Monto: $' + pago.monto + ' pesos\n' +
-          '📅 Fecha: ' + new Date().toLocaleDateString('es-MX') + '\n\n' +
-          '¡Gracias por tu pago! 🎁'
+          '📅 Fecha: ' + new Date().toLocaleDateString('es-MX') +
+          (pago.concepto === 'Membresía anual' ? '\n⏳ Vigencia: ' + new Date(userU.vigencia).toLocaleDateString('es-MX') : '') +
+          (estabaCongelado ? '\n\n🎉 *Tu cuenta ha sido reactivada.*\nYa puedes disfrutar de todos los beneficios.' : '') +
+          '\n\n¡Gracias por tu pago! 🛒'
         );
+
+        // Notificar al patrocinador si se reactivó
+        if (estabaCongelado && userU.referidoPor) {
+          const patrocinador = await Usuario.findOne({ id: userU.referidoPor });
+          if (patrocinador) {
+            await enviarMensaje(patrocinador.telefono,
+              '✅ *Tu referido se reactivó*\n\n' +
+              '*' + userU.nombre + '* (' + userU.id + ') regularizó su pago y su cuenta está activa nuevamente.'
+            );
+          }
+        }
         return;
       }
 
