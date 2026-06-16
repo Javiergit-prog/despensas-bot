@@ -495,18 +495,55 @@ async function procesarMensaje(telefono, mensaje) {
       }
       const u = usuarioExistente;
       const color = COLORES_NIVEL[u.nivel || 0] || 'VIOLETA';
-      const vigenciaStr = u.vigencia ? new Date(u.vigencia).toLocaleDateString('es-MX') : 'N/A';
+      const vigenciaStr = u.vigencia ? new Date(u.vigencia).toLocaleDateString('es-MX') : 'No registrada';
+
+      // Calcular estado de membresía
+      const hoy = new Date();
+      const vigenciaDate = u.vigencia ? new Date(u.vigencia) : null;
+      const diasRestantes = vigenciaDate ? Math.ceil((vigenciaDate - hoy) / (1000 * 60 * 60 * 24)) : null;
+      let estadoMembresia = '';
+      if (!vigenciaDate) estadoMembresia = '⏳ Sin membresía activa';
+      else if (diasRestantes < 0) estadoMembresia = '❌ Membresía vencida';
+      else if (diasRestantes <= 30) estadoMembresia = '⚠️ Vence en ' + diasRestantes + ' días';
+      else estadoMembresia = '✅ Activa (' + diasRestantes + ' días restantes)';
+
+      // Último pago confirmado
+      const pagosConfirmados = u.pagos ? u.pagos.filter(p => p.estado === 'confirmado') : [];
+      const ultimoPago = pagosConfirmados.length > 0 ? pagosConfirmados[pagosConfirmados.length - 1] : null;
+      const ultimoPagoStr = ultimoPago
+        ? new Date(ultimoPago.fecha).toLocaleDateString('es-MX') + ' — $' + ultimoPago.monto + ' (' + ultimoPago.concepto + ')'
+        : 'Sin pagos confirmados';
+
+      // Pagos pendientes
+      const pagosPendientes = u.pagos ? u.pagos.filter(p => p.estado === 'pendiente') : [];
+
       await enviarMensaje(telefono,
-        '👤 *TU INFORMACION*\n\n' +
+        '👤 *MI CUENTA*\n' +
+        '━━━━━━━━━━━━━━━━━━━━\n' +
         '🪪 ID: *' + u.id + '*\n' +
-        '👤 Nombre: ' + u.nombre + '\n' +
+        '👤 ' + u.nombre + '\n' +
         '🎨 Nivel: ' + (u.nivel || 0) + ' — ' + color + '\n' +
-        '👥 Referidos: ' + u.referidos.length + '/4\n' +
-        '📅 Registro: ' + new Date(u.fechaRegistro).toLocaleDateString('es-MX') + '\n' +
-        '⏳ Vigencia: ' + vigenciaStr + '\n' +
-        '✅ Estado: ' + (u.activo ? 'Activo' : 'Inactivo') + '\n\n' +
-        'Escribe MENU para volver.'
+        '👥 Referidos: ' + u.referidos.length + '/4\n\n' +
+        '📋 *MEMBRESÍA*\n' +
+        estadoMembresia + '\n' +
+        '📅 Vencimiento: ' + vigenciaStr + '\n\n' +
+        '💰 *PAGOS*\n' +
+        '✅ Último pago: ' + ultimoPagoStr + '\n' +
+        (pagosPendientes.length > 0 ? '⏳ Tienes *' + pagosPendientes.length + '* pago(s) pendiente(s) de validar\n' : '') +
+        '\n🔗 Tu credencial:\nhttps://despensas-bot-production.up.railway.app/credencial/' + u.id + '\n\n' +
+        'Escribe *MENU* para volver.'
       );
+      return;
+    }
+
+    // ── COMANDO MI CUENTA (disponible en cualquier momento)
+    if (texto === 'MI CUENTA' || texto === 'MICUENTA') {
+      if (!usuarioExistente) {
+        await enviarMensaje(telefono, '❌ No tienes cuenta registrada.\n\nEscribe *MENU* para registrarte.');
+        return;
+      }
+      sesiones[telefono] = { paso: 'menu', datos: {} };
+      await procesarMensaje(telefono, '2');
       return;
     }
 
