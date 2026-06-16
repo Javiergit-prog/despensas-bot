@@ -289,8 +289,8 @@ async function procesarMensaje(telefono, mensaje) {
 
     if (texto === 'OTP' && esSuperAdmin) {
       const codigo = generarOTP();
-      otpSesiones[telLimpio] = { codigo: codigo, expira: Date.now() + 5 * 60 * 1000 };
-      await enviarMensaje(telefono,
+      otpSesiones['admin'] = { codigo: codigo, expira: Date.now() + 5 * 60 * 1000 };
+      await enviarMensaje('5215585567250',
         '🔐 *CÓDIGO DE ACCESO ADMIN*\n\n' +
         'Tu código OTP es:\n\n' +
         '*' + codigo + '*\n\n' +
@@ -804,7 +804,7 @@ app.get('/admin/login', function(req, res) {
       </body></html>
     `);
   }
-  if (otpValido(tel, otp)) {
+  if (otpValido('admin', otp)) {
     return res.send(`
       <html><body style="font-family:sans-serif;max-width:600px;margin:50px auto;text-align:center">
         <h2>✅ Acceso autorizado</h2>
