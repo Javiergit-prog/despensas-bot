@@ -4,21 +4,6 @@ const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
 const nodeCrypto = require('crypto');
-const nodemailer = require('nodemailer');
-
-// ============================================================
-// CONFIGURACION NODEMAILER
-// ============================================================
-const CORREO_ADMIN = 'frjvvm@gmail.com';
-const GMAIL_PASSWORD = 'ormbnuavluezgvst';
-
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: CORREO_ADMIN,
-    pass: GMAIL_PASSWORD
-  }
-});
 
 // ============================================================
 // CONEXION A MONGODB
@@ -203,36 +188,31 @@ async function enviarRespaldoDiario() {
     const total = usuarios.length;
     const activos = usuarios.filter(function(u) { return u.activo; }).length;
     const inactivos = total - activos;
-    const fecha = new Date().toLocaleDateString('es-MX', { 
-      year: 'numeric', month: 'long', day: 'numeric', 
-      hour: '2-digit', minute: '2-digit' 
+    const conPago = usuarios.filter(function(u) {
+      return u.pagos && u.pagos.some(function(p) { return p.estado === 'confirmado'; });
+    }).length;
+    const fecha = new Date().toLocaleDateString('es-MX', {
+      year: 'numeric', month: 'long', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
     });
 
-    // Crear resumen de usuarios
-    const resumen = usuarios.map(function(u) {
-      return u.id + ' | ' + u.nombre + ' | Nv.' + (u.nivel||0) + ' | ' + 
-             (u.activo ? 'Activo' : 'Inactivo') + ' | Refs: ' + u.referidos.length + '/4 | ' +
-             'Registro: ' + new Date(u.fechaRegistro).toLocaleDateString('es-MX');
-    }).join('\n');
+    const mensaje =
+      '📦 *RESPALDO NOCTURNO DESPENSACLUB*\n' +
+      '━━━━━━━━━━━━━━━━━━━━\n' +
+      '📅 ' + fecha + '\n\n' +
+      '👥 Total usuarios: *' + total + '*\n' +
+      '✅ Activos: *' + activos + '*\n' +
+      '❌ Inactivos: *' + inactivos + '*\n' +
+      '💰 Con pago confirmado: *' + conPago + '*\n' +
+      '⏳ Sin pago: *' + (total - conPago) + '*\n\n' +
+      '💾 Base de datos: MongoDB Atlas ✅\n' +
+      '━━━━━━━━━━━━━━━━━━━━\n' +
+      '_DespensaClub Bot — Respaldo automático_';
 
-    // Enviar via Nodemailer
-    await transporter.sendMail({
-      from: '"DespensaClub Bot" <' + CORREO_ADMIN + '>',
-      to: CORREO_ADMIN,
-      subject: '📦 Respaldo DespensaClub — ' + fecha,
-      text: 
-        'RESPALDO DIARIO DESPENSACLUB\n\n' +
-        'Fecha: ' + fecha + '\n' +
-        'Total usuarios: ' + total + '\n' +
-        'Activos: ' + activos + '\n' +
-        'Inactivos: ' + inactivos + '\n\n' +
-        '── LISTA DE USUARIOS ──\n\n' +
-        (resumen || 'No hay usuarios registrados')
-    });
-
-    console.log('✅ Respaldo enviado a ' + CORREO_ADMIN);
+    await enviarMensaje(ADMIN_PHONE, mensaje);
+    console.log('✅ Respaldo enviado por WhatsApp a ' + ADMIN_PHONE);
   } catch (err) {
-    console.error('❌ Error enviando respaldo:', err.response ? JSON.stringify(err.response.data) : err.message);
+    console.error('❌ Error enviando respaldo:', err.message);
   }
 }
 
@@ -791,7 +771,7 @@ app.get('/admin/respaldo', async function(req, res) {
   }
   try {
     await enviarRespaldoDiario();
-    res.send('✅ Respaldo enviado a ' + CORREO_ADMIN);
+    res.send('✅ Respaldo enviado por WhatsApp al número del negocio.');
   } catch (err) {
     res.status(500).send('Error: ' + err.message);
   }
@@ -815,6 +795,56 @@ app.get('/admin/lista', async function(req, res) {
 app.get('/', function(req, res) {
   res.send('Bot DespensaClub Familiar funcionando correctamente.');
 });
+
+// ============================================================
+// MONITOREO Y RECONEXIÓN AUTOMÁTICA DE WHATSAPP
+// ============================================================
+const WASENDER_STATUS_URL = 'https://api.wasenderapi.com/api/session/status';
+let estadoConexion = 'desconocido';
+let avisoEnviado = false;
+
+async function verificarConexionWhatsApp() {
+  try {
+    const resp = await axios.get(WASENDER_STATUS_URL, {
+      headers: { 'Authorization': 'Bearer ' + WASENDER_TOKEN }
+    });
+    const status = resp.data && (resp.data.status || resp.data.state || 'desconocido');
+    
+    if (status === 'CONNECTED' || status === 'connected' || status === 'open') {
+      if (estadoConexion !== 'conectado') {
+        console.log('✅ WhatsApp reconectado correctamente.');
+        if (avisoEnviado) {
+          // Avisar que ya se reconectó
+          await enviarMensaje(ADMIN_PHONE, '✅ *WhatsApp reconectado*\n\nEl bot está funcionando nuevamente.');
+          avisoEnviado = false;
+        }
+      }
+      estadoConexion = 'conectado';
+    } else {
+      console.log('⚠️ WhatsApp desconectado. Estado: ' + status);
+      if (!avisoEnviado) {
+        await enviarMensaje(ADMIN_PHONE,
+          '⚠️ *ALERTA — Bot desconectado*\n\n' +
+          'El bot de WhatsApp se desconectó.\n\n' +
+          '📱 Para reconectar:\n' +
+          '1. Ve a wasenderapi.com\n' +
+          '2. Inicia sesión\n' +
+          '3. Escanea el código QR\n\n' +
+          'El bot no responderá hasta reconectarse.'
+        );
+        avisoEnviado = true;
+      }
+      estadoConexion = 'desconectado';
+    }
+  } catch (err) {
+    console.log('⚠️ Error verificando conexión WhatsApp:', err.message);
+  }
+}
+
+// Verificar conexión cada 5 minutos
+setInterval(verificarConexionWhatsApp, 5 * 60 * 1000);
+// Primera verificación al iniciar (esperar 30 segundos)
+setTimeout(verificarConexionWhatsApp, 30 * 1000);
 
 const PORT = process.env.PORT || process.env.RAILWAY_TCP_PROXY_PORT || 3000;
 app.listen(PORT, '0.0.0.0', function() {
