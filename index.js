@@ -1433,6 +1433,170 @@ app.get('/credencial/:id', async function(req, res) {
   }
 });
 
+app.get('/admin/dashboard', async function(req, res) {
+  if (req.query.key !== 'despensas2026') {
+    return res.status(403).send('Acceso denegado');
+  }
+  try {
+    const hoy = new Date();
+    const mesActual = hoy.getMonth();
+    const anioActual = hoy.getFullYear();
+    const todos = await Usuario.find({}).lean();
+
+    const totalUsuarios = todos.length;
+    const activos = todos.filter(u => u.activo && !u.congelado).length;
+    const congelados = todos.filter(u => u.congelado).length;
+    const inactivos = todos.filter(u => !u.activo && !u.congelado).length;
+
+    // Pagos del mes
+    let pagosPendientes = 0;
+    let pagosConfirmados = 0;
+    let ingresosMes = 0;
+    for (const u of todos) {
+      if (u.pagos) {
+        pagosPendientes += u.pagos.filter(p => p.estado === 'pendiente').length;
+        const conf = u.pagos.filter(p => {
+          const fp = new Date(p.fecha);
+          return p.estado === 'confirmado' &&
+                 fp.getMonth() === mesActual &&
+                 fp.getFullYear() === anioActual;
+        });
+        pagosConfirmados += conf.length;
+        ingresosMes += conf.reduce((s, p) => s + (p.monto || 0), 0);
+      }
+    }
+
+    // Consumos del mes
+    let consumosMes = 0;
+    for (const u of todos) {
+      if (u.consumos) {
+        consumosMes += u.consumos.filter(c => {
+          const fc = new Date(c.fecha);
+          return fc.getMonth() === mesActual && fc.getFullYear() === anioActual;
+        }).length;
+      }
+    }
+
+    // Últimos 5 registros
+    const ultimos = [...todos].sort((a, b) => new Date(b.fechaRegistro) - new Date(a.fechaRegistro)).slice(0, 5);
+
+    // Membresías por vencer en 30 días
+    const porVencer = todos.filter(u => {
+      if (!u.vigencia) return false;
+      const dias = Math.ceil((new Date(u.vigencia) - hoy) / (1000 * 60 * 60 * 24));
+      return dias > 0 && dias <= 30;
+    }).length;
+
+    const mes = hoy.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard — DespensaClub</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #1a1a2e; color: #fff; padding: 16px; min-height: 100vh; }
+    h1 { text-align: center; color: #25D366; font-size: 20px; margin-bottom: 4px; }
+    .sub { text-align: center; color: #aaa; font-size: 12px; margin-bottom: 20px; }
+    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px; }
+    .card { background: #16213e; border-radius: 12px; padding: 16px; text-align: center; }
+    .card-num { font-size: 32px; font-weight: bold; }
+    .card-label { font-size: 11px; color: #aaa; margin-top: 4px; }
+    .card.verde .card-num { color: #25D366; }
+    .card.amarillo .card-num { color: #FFC107; }
+    .card.rojo .card-num { color: #f44336; }
+    .card.azul .card-num { color: #2196F3; }
+    .card.morado .card-num { color: #9C27B0; }
+    .card.naranja .card-num { color: #FF6B2B; }
+    .seccion { background: #16213e; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .seccion h3 { font-size: 14px; color: #25D366; margin-bottom: 12px; }
+    .usuario-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #0f3460; font-size: 12px; }
+    .usuario-row:last-child { border-bottom: none; }
+    .badge { border-radius: 20px; padding: 2px 8px; font-size: 10px; font-weight: bold; }
+    .badge-activo { background: #1b5e20; color: #fff; }
+    .badge-congelado { background: #0d47a1; color: #fff; }
+    .badge-inactivo { background: #b71c1c; color: #fff; }
+    .alerta { background: #f44336; border-radius: 8px; padding: 10px; margin-bottom: 8px; font-size: 12px; }
+    .links { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 16px; }
+    .btn { display: block; padding: 10px; background: #0f3460; border-radius: 8px; text-align: center; color: #fff; text-decoration: none; font-size: 12px; }
+    .btn:hover { background: #25D366; color: #000; }
+    .refresh { display: block; text-align: center; margin-top: 16px; color: #25D366; font-size: 13px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>🛒 DespensaClub Familiar</h1>
+  <p class="sub">Dashboard — ${mes.toUpperCase()}</p>
+
+  <div class="grid">
+    <div class="card verde">
+      <div class="card-num">${totalUsuarios}</div>
+      <div class="card-label">👥 Total usuarios</div>
+    </div>
+    <div class="card verde">
+      <div class="card-num">${activos}</div>
+      <div class="card-label">✅ Activos</div>
+    </div>
+    <div class="card azul">
+      <div class="card-num">${congelados}</div>
+      <div class="card-label">❄️ Congelados</div>
+    </div>
+    <div class="card rojo">
+      <div class="card-num">${inactivos}</div>
+      <div class="card-label">❌ Inactivos</div>
+    </div>
+    <div class="card amarillo">
+      <div class="card-num">${pagosPendientes}</div>
+      <div class="card-label">⏳ Pagos pendientes</div>
+    </div>
+    <div class="card verde">
+      <div class="card-num">$${ingresosMes}</div>
+      <div class="card-label">💰 Ingresos del mes</div>
+    </div>
+    <div class="card morado">
+      <div class="card-num">${pagosConfirmados}</div>
+      <div class="card-label">✅ Pagos confirmados</div>
+    </div>
+    <div class="card naranja">
+      <div class="card-num">${consumosMes}</div>
+      <div class="card-label">📦 Despensas entregadas</div>
+    </div>
+  </div>
+
+  ${pagosPendientes > 0 ? `<div class="alerta">⚠️ Tienes <strong>${pagosPendientes}</strong> pago(s) pendiente(s) de validar.</div>` : ''}
+  ${porVencer > 0 ? `<div class="alerta" style="background:#e65100">⚠️ <strong>${porVencer}</strong> membresía(s) vencen en menos de 30 días.</div>` : ''}
+
+  <div class="seccion">
+    <h3>🆕 Últimos registros</h3>
+    ${ultimos.map(u => `
+      <div class="usuario-row">
+        <div>
+          <div style="font-weight:bold">${u.nombre}</div>
+          <div style="color:#aaa">${u.id}</div>
+        </div>
+        <span class="badge ${u.congelado ? 'badge-congelado' : u.activo ? 'badge-activo' : 'badge-inactivo'}">
+          ${u.congelado ? '❄️ Congelado' : u.activo ? '✅ Activo' : '❌ Inactivo'}
+        </span>
+      </div>
+    `).join('')}
+  </div>
+
+  <div class="links">
+    <a class="btn" href="/admin/arbol?key=despensas2026">🌳 Árbol</a>
+    <a class="btn" href="/admin/lista?key=despensas2026">📋 Lista</a>
+    <a class="btn" href="/admin/respaldo?key=despensas2026">📦 Respaldo</a>
+    <a class="btn" href="/admin/login">🔐 Panel</a>
+  </div>
+
+  <span class="refresh" onclick="location.reload()">🔄 Actualizar</span>
+</body>
+</html>`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
 app.get('/admin/arbol', async function(req, res) {
   if (req.query.key !== 'despensas2026') {
     return res.status(403).send('Acceso denegado');
@@ -1571,6 +1735,7 @@ app.get('/admin/login', function(req, res) {
       <html><body style="font-family:sans-serif;max-width:600px;margin:50px auto;text-align:center">
         <h2>✅ Acceso autorizado</h2>
         <p>Bienvenido al panel de administración DespensaClub.</p>
+        <p><a href="/admin/dashboard?key=despensas2026">📊 Dashboard</a></p>
         <p><a href="/admin/lista?key=despensas2026">📋 Ver lista de usuarios</a></p>
         <p><a href="/admin/arbol?key=despensas2026">🌳 Ver árbol jerárquico</a></p>
         <p><a href="/admin/respaldo?key=despensas2026">📦 Enviar respaldo</a></p>
