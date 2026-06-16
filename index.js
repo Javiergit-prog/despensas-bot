@@ -799,7 +799,7 @@ app.get('/', function(req, res) {
 // ============================================================
 // MONITOREO Y RECONEXIÓN AUTOMÁTICA DE WHATSAPP
 // ============================================================
-const WASENDER_STATUS_URL = 'https://api.wasenderapi.com/api/session';
+const WASENDER_STATUS_URL = 'https://www.wasenderapi.com/api/status';
 let estadoConexion = 'desconocido';
 let avisoEnviado = false;
 
@@ -808,16 +808,13 @@ async function verificarConexionWhatsApp() {
     const resp = await axios.get(WASENDER_STATUS_URL, {
       headers: { 'Authorization': 'Bearer ' + WASENDER_TOKEN }
     });
-    const status = resp.data && (resp.data.status || resp.data.state || 'desconocido');
-    
-    if (status === 'CONNECTED' || status === 'connected' || status === 'open') {
-      if (estadoConexion !== 'conectado') {
-        console.log('✅ WhatsApp reconectado correctamente.');
-        if (avisoEnviado) {
-          // Avisar que ya se reconectó
+    const status = resp.data && resp.data.status;
+    console.log('Estado WhatsApp: ' + status);
+
+    if (status === 'connected') {
+      if (estadoConexion !== 'conectado' && avisoEnviado) {
         await enviarMensaje('5215585567250', '✅ *WhatsApp reconectado*\n\nEl bot está funcionando nuevamente.');
-          avisoEnviado = false;
-        }
+        avisoEnviado = false;
       }
       estadoConexion = 'conectado';
     } else {
@@ -825,7 +822,7 @@ async function verificarConexionWhatsApp() {
       if (!avisoEnviado) {
         await enviarMensaje('5215585567250',
           '⚠️ *ALERTA — Bot desconectado*\n\n' +
-          'El bot de WhatsApp se desconectó.\n\n' +
+          'Estado: ' + status + '\n\n' +
           '📱 Para reconectar:\n' +
           '1. Ve a wasenderapi.com\n' +
           '2. Inicia sesión\n' +
