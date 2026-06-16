@@ -233,6 +233,27 @@ function iniciarRespaldoDiario() {
 }
 
 // ============================================================
+// SISTEMA OTP — LOGIN SEGURO ADMIN
+// ============================================================
+const otpSesiones = {}; // { telefono: { codigo, expira } }
+
+function generarOTP() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function otpValido(telefono, codigo) {
+  const otp = otpSesiones[telefono];
+  if (!otp) return false;
+  if (Date.now() > otp.expira) {
+    delete otpSesiones[telefono];
+    return false;
+  }
+  if (otp.codigo !== codigo) return false;
+  delete otpSesiones[telefono];
+  return true;
+}
+
+// ============================================================
 // MENU PRINCIPAL
 // ============================================================
 function menuPrincipal() {
@@ -266,7 +287,18 @@ async function procesarMensaje(telefono, mensaje) {
       ADMIN_PHONE.includes(String(telLimpio).slice(-10))
     );
 
-    if (texto === 'RESETBD' && esSuperAdmin) {
+    if (texto === 'OTP' && esSuperAdmin) {
+      const codigo = generarOTP();
+      otpSesiones[telLimpio] = { codigo: codigo, expira: Date.now() + 5 * 60 * 1000 };
+      await enviarMensaje(telefono,
+        '🔐 *CÓDIGO DE ACCESO ADMIN*\n\n' +
+        'Tu código OTP es:\n\n' +
+        '*' + codigo + '*\n\n' +
+        '⏱️ Válido por *5 minutos*\n' +
+        '⚠️ No lo compartas con nadie.'
+      );
+      return;
+    }
       await Usuario.deleteMany({});
       await Contador.deleteMany({});
       await Contador.create({ nombre: 'usuarios', valor: 109 });
@@ -748,6 +780,46 @@ app.post('/webhook', async function(req, res) {
   } catch (err) {
     console.error('Error en webhook:', err.message);
   }
+});
+
+app.get('/admin/login', function(req, res) {
+  const otp = req.query.otp;
+  const tel = req.query.tel || '5576683884';
+  if (!otp) {
+    return res.send(`
+      <html><body style="font-family:sans-serif;max-width:400px;margin:100px auto;text-align:center">
+        <h2>🔐 DespensaClub Admin</h2>
+        <p>Primero manda <b>OTP</b> por WhatsApp al bot para recibir tu código.</p>
+        <form method="GET">
+          <input name="otp" placeholder="Ingresa tu código de 6 dígitos" 
+            style="padding:10px;font-size:18px;width:200px;text-align:center;letter-spacing:8px">
+          <input name="tel" type="hidden" value="${tel}">
+          <br><br>
+          <button type="submit" style="padding:10px 30px;background:#25D366;color:white;border:none;border-radius:5px;font-size:16px;cursor:pointer">
+            Entrar
+          </button>
+        </form>
+      </body></html>
+    `);
+  }
+  if (otpValido(tel, otp)) {
+    return res.send(`
+      <html><body style="font-family:sans-serif;max-width:600px;margin:50px auto;text-align:center">
+        <h2>✅ Acceso autorizado</h2>
+        <p>Bienvenido al panel de administración DespensaClub.</p>
+        <p><a href="/admin/lista?key=despensas2026">📋 Ver lista de usuarios</a></p>
+        <p><a href="/admin/respaldo?key=despensas2026">📦 Enviar respaldo</a></p>
+        <p><a href="/admin/resetbd?key=despensas2026">🗑️ Reset base de datos</a></p>
+      </body></html>
+    `);
+  }
+  return res.send(`
+    <html><body style="font-family:sans-serif;max-width:400px;margin:100px auto;text-align:center">
+      <h2>❌ Código incorrecto o expirado</h2>
+      <p>Manda <b>OTP</b> nuevamente por WhatsApp para obtener un código nuevo.</p>
+      <a href="/admin/login">Intentar de nuevo</a>
+    </body></html>
+  `);
 });
 
 app.get('/admin/resetbd', async function(req, res) {
