@@ -209,8 +209,8 @@ async function enviarRespaldoDiario() {
       '━━━━━━━━━━━━━━━━━━━━\n' +
       '_DespensaClub Bot — Respaldo automático_';
 
-    await enviarMensaje(ADMIN_PHONE, mensaje);
-    console.log('✅ Respaldo enviado por WhatsApp a ' + ADMIN_PHONE);
+    await enviarMensaje('5215585567250', mensaje);
+    console.log('✅ Respaldo enviado por WhatsApp a 5215585567250');
   } catch (err) {
     console.error('❌ Error enviando respaldo:', err.message);
   }
@@ -799,7 +799,7 @@ app.get('/', function(req, res) {
 // ============================================================
 // MONITOREO Y RECONEXIÓN AUTOMÁTICA DE WHATSAPP
 // ============================================================
-const WASENDER_STATUS_URL = 'https://api.wasenderapi.com/api/session/status';
+const WASENDER_STATUS_URL = 'https://api.wasenderapi.com/api/session';
 let estadoConexion = 'desconocido';
 let avisoEnviado = false;
 
@@ -815,7 +815,7 @@ async function verificarConexionWhatsApp() {
         console.log('✅ WhatsApp reconectado correctamente.');
         if (avisoEnviado) {
           // Avisar que ya se reconectó
-          await enviarMensaje(ADMIN_PHONE, '✅ *WhatsApp reconectado*\n\nEl bot está funcionando nuevamente.');
+        await enviarMensaje('5215585567250', '✅ *WhatsApp reconectado*\n\nEl bot está funcionando nuevamente.');
           avisoEnviado = false;
         }
       }
@@ -823,7 +823,7 @@ async function verificarConexionWhatsApp() {
     } else {
       console.log('⚠️ WhatsApp desconectado. Estado: ' + status);
       if (!avisoEnviado) {
-        await enviarMensaje(ADMIN_PHONE,
+        await enviarMensaje('5215585567250',
           '⚠️ *ALERTA — Bot desconectado*\n\n' +
           'El bot de WhatsApp se desconectó.\n\n' +
           '📱 Para reconectar:\n' +
