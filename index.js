@@ -32,8 +32,10 @@ const usuarioSchema = new mongoose.Schema({
   vigencia: Date,
   pagos: [{
     monto: Number,
+    concepto: String,
     fecha: Date,
-    estado: String
+    estado: String,
+    comprobante: String
   }],
   consumos: [{
     fecha: Date,
@@ -306,6 +308,104 @@ function iniciarRecordatorios() {
   setTimeout(function() {
     enviarRecordatorios();
     setInterval(enviarRecordatorios, 24 * 60 * 60 * 1000);
+  }, tiempoEspera);
+}
+
+// ============================================================
+// CONGELAMIENTO AUTOMÁTICO
+// ============================================================
+const USUARIOS_EXENTOS = ['DESP-000110', 'DESP-000111']; // Nunca se congelan
+
+async function verificarCongelamiento() {
+  try {
+    console.log('Verificando congelamientos...');
+    const hoy = new Date();
+    const usuarios = await Usuario.find({ activo: true, congelado: false });
+
+    for (const u of usuarios) {
+      // Saltar usuarios exentos
+      if (USUARIOS_EXENTOS.includes(u.id)) continue;
+
+      // Verificar si tiene pago de despensa confirmado este mes
+      const mesActual = hoy.getMonth();
+      const anioActual = hoy.getFullYear();
+      const pagosEsteMes = u.pagos ? u.pagos.filter(p => {
+        const fechaPago = new Date(p.fecha);
+        return p.estado === 'confirmado' &&
+               p.concepto === 'Despensa mensual' &&
+               fechaPago.getMonth() === mesActual &&
+               fechaPago.getFullYear() === anioActual;
+      }) : [];
+
+      // Si estamos después del día 10 y no ha pagado, congelar
+      if (hoy.getDate() > 10 && pagosEsteMes.length === 0) {
+        // Aviso 5 días antes (día 5)
+        if (hoy.getDate() === 5) {
+          await enviarMensaje(u.telefono,
+            '⚠️ *AVISO IMPORTANTE*\n\n' +
+            'Hola *' + u.nombre + '* 👋\n\n' +
+            'No hemos recibido tu pago de despensa este mes.\n\n' +
+            '📅 Si no registras tu pago antes del *día 10*, tu cuenta será congelada temporalmente.\n\n' +
+            '💵 Despensa mensual: *$250 pesos*\n\n' +
+            'Para pagar escribe *MENU* → opción *4*'
+          );
+          await new Promise(r => setTimeout(r, 1000));
+          continue;
+        }
+
+        // Congelar después del día 10
+        if (hoy.getDate() > 10) {
+          await Usuario.updateOne({ id: u.id }, { congelado: true, activo: false });
+
+          // Notificar al usuario
+          await enviarMensaje(u.telefono,
+            '❄️ *CUENTA CONGELADA*\n\n' +
+            'Hola *' + u.nombre + '*\n\n' +
+            'Tu cuenta ha sido congelada por falta de pago de despensa este mes.\n\n' +
+            'Para reactivarla:\n' +
+            '1️⃣ Realiza tu pago de *$250 pesos*\n' +
+            '2️⃣ Sube tu comprobante escribiendo *MENU* → opción *4*\n' +
+            '3️⃣ El administrador validará y reactivará tu cuenta\n\n' +
+            'Si tienes dudas contacta al administrador:\n' +
+            'https://wa.me/525576683884'
+          );
+
+          // Notificar al patrocinador si tiene
+          if (u.referidoPor) {
+            const patrocinador = await Usuario.findOne({ id: u.referidoPor });
+            if (patrocinador) {
+              await enviarMensaje(patrocinador.telefono,
+                '❄️ *AVISO — Referido congelado*\n\n' +
+                'Tu referido *' + u.nombre + '* (' + u.id + ') fue congelado por falta de pago.\n\n' +
+                'Puedes contactarlo para apoyarlo a regularizarse.'
+              );
+            }
+          }
+
+          console.log('❄️ Usuario congelado: ' + u.id + ' — ' + u.nombre);
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+    }
+    console.log('✅ Verificación de congelamientos completada');
+  } catch (err) {
+    console.error('❌ Error en congelamiento:', err.message);
+  }
+}
+
+// Ejecutar verificación de congelamiento diario a las 8 AM hora Mexico (2 PM UTC)
+function iniciarCongelamiento() {
+  var ahora = new Date();
+  var proximaEjecucion = new Date();
+  proximaEjecucion.setUTCHours(14, 0, 0, 0);
+  if (proximaEjecucion <= ahora) {
+    proximaEjecucion.setDate(proximaEjecucion.getDate() + 1);
+  }
+  var tiempoEspera = proximaEjecucion - ahora;
+  console.log('Próximo congelamiento en ' + Math.round(tiempoEspera/1000/60) + ' minutos');
+  setTimeout(function() {
+    verificarCongelamiento();
+    setInterval(verificarCongelamiento, 24 * 60 * 60 * 1000);
   }, tiempoEspera);
 }
 
@@ -778,6 +878,13 @@ async function procesarMensaje(telefono, mensaje) {
     );
 
     if (esAdmin) {
+
+      if (texto === 'VERIFICAR') {
+        await enviarMensaje(telefono, '❄️ Verificando congelamientos...');
+        await verificarCongelamiento();
+        await enviarMensaje(telefono, '✅ Verificación completada.');
+        return;
+      }
 
       if (texto === 'RECORDATORIOS') {
         await enviarMensaje(telefono, '📅 Enviando recordatorios...');
@@ -1413,4 +1520,5 @@ app.listen(PORT, '0.0.0.0', function() {
   console.log('Bot corriendo en puerto ' + PORT);
   iniciarRespaldoDiario();
   iniciarRecordatorios();
+  iniciarCongelamiento();
 });
