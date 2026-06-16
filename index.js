@@ -658,6 +658,8 @@ async function procesarMensaje(telefono, mensaje) {
     const esAdmin = (
       String(telefono).includes('5576683884') ||
       String(telLimpio).includes('5576683884') ||
+      String(telefono).includes('5585567250') ||
+      String(telLimpio).includes('5585567250') ||
       ADMIN_PHONE.includes(String(telLimpio).slice(-10))
     );
 
@@ -680,15 +682,52 @@ async function procesarMensaje(telefono, mensaje) {
       }
 
       if (texto.startsWith('CONFIRMAR ')) {
-        const idU = texto.split(' ')[1];
+        const idU = texto.replace('CONFIRMAR ', '').trim().toUpperCase();
         const userU = await Usuario.findOne({ id: idU });
-        if (!userU) { await enviarMensaje(telefono, '❌ No encontre el usuario ' + idU); return; }
-        const pagoIdx = userU.pagos.findLastIndex(function(p) { return p.estado === 'pendiente_confirmacion'; });
+        if (!userU) { await enviarMensaje(telefono, '❌ No encontré el usuario ' + idU); return; }
+        const pagoIdx = userU.pagos.findLastIndex(function(p) { return p.estado === 'pendiente'; });
         if (pagoIdx === -1) { await enviarMensaje(telefono, '❌ No hay pagos pendientes para ' + idU); return; }
         userU.pagos[pagoIdx].estado = 'confirmado';
         await userU.save();
-        await enviarMensaje(telefono, '✅ Pago de ' + userU.nombre + ' confirmado.');
-        await enviarMensaje(userU.telefono, '✅ *TU PAGO FUE CONFIRMADO*\n\nMonto: $' + userU.pagos[pagoIdx].monto + '\nGracias ' + userU.nombre + '! 🎁');
+        const pago = userU.pagos[pagoIdx];
+        await enviarMensaje(telefono,
+          '✅ *PAGO CONFIRMADO*\n\n' +
+          '👤 ' + userU.nombre + '\n' +
+          '🪪 ' + idU + '\n' +
+          '💵 ' + pago.concepto + ' — $' + pago.monto + ' pesos'
+        );
+        await enviarMensaje(userU.telefono,
+          '✅ *TU PAGO FUE CONFIRMADO*\n\n' +
+          'Hola *' + userU.nombre + '*\n\n' +
+          '💵 Concepto: ' + pago.concepto + '\n' +
+          '💵 Monto: $' + pago.monto + ' pesos\n' +
+          '📅 Fecha: ' + new Date().toLocaleDateString('es-MX') + '\n\n' +
+          '¡Gracias por tu pago! 🎁'
+        );
+        return;
+      }
+
+      if (texto.startsWith('RECHAZAR ')) {
+        const idU = texto.replace('RECHAZAR ', '').trim().toUpperCase();
+        const userU = await Usuario.findOne({ id: idU });
+        if (!userU) { await enviarMensaje(telefono, '❌ No encontré el usuario ' + idU); return; }
+        const pagoIdx = userU.pagos.findLastIndex(function(p) { return p.estado === 'pendiente'; });
+        if (pagoIdx === -1) { await enviarMensaje(telefono, '❌ No hay pagos pendientes para ' + idU); return; }
+        userU.pagos[pagoIdx].estado = 'rechazado';
+        await userU.save();
+        await enviarMensaje(telefono,
+          '❌ *PAGO RECHAZADO*\n\n' +
+          '👤 ' + userU.nombre + '\n' +
+          '🪪 ' + idU + '\n' +
+          'El usuario fue notificado.'
+        );
+        await enviarMensaje(userU.telefono,
+          '❌ *TU COMPROBANTE FUE RECHAZADO*\n\n' +
+          'Hola *' + userU.nombre + '*\n\n' +
+          'Tu comprobante de pago no pudo ser validado.\n\n' +
+          'Por favor verifica y vuelve a enviarlo o contacta al administrador:\n' +
+          'https://wa.me/525576683884'
+        );
         return;
       }
 
