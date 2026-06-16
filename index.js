@@ -299,6 +299,8 @@ async function procesarMensaje(telefono, mensaje) {
       );
       return;
     }
+
+    if (texto === 'RESETBD' && esSuperAdmin) {
       await Usuario.deleteMany({});
       await Contador.deleteMany({});
       await Contador.create({ nombre: 'usuarios', valor: 109 });
