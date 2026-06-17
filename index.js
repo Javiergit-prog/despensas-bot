@@ -168,10 +168,10 @@ async function enviarMensaje(telefono, mensaje) {
 async function enviarImagen(telefono, urlImagen, caption) {
   try {
     const tel = String(telefono).replace('@s.whatsapp.net', '').replace('@c.us', '');
-    await axios.post('https://api.wasenderapi.com/api/send-image', {
+    await axios.post(WASENDER_URL, {
       to: tel,
-      image: urlImagen,
-      caption: caption
+      text: caption,
+      imageUrl: urlImagen
     }, {
       headers: {
         'Authorization': 'Bearer ' + WASENDER_TOKEN,
