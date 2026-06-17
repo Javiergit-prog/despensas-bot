@@ -146,6 +146,19 @@ async function buscarPosicionDisponible() {
 const sesiones = {};
 
 // ============================================================
+// ANTIFRAUDE AVANZADO — registro de intentos recientes
+// ============================================================
+const registrosRecientes = []; // [{ fecha, telefono }]
+const LIMITE_REGISTROS_POR_HORA = 5; // umbral de alerta por abuso
+
+function limpiarRegistrosViejos() {
+  const haceUnaHora = Date.now() - (60 * 60 * 1000);
+  while (registrosRecientes.length > 0 && registrosRecientes[0].fecha < haceUnaHora) {
+    registrosRecientes.shift();
+  }
+}
+
+// ============================================================
 // ENVIAR MENSAJE DE TEXTO
 // ============================================================
 async function enviarMensaje(telefono, mensaje) {
@@ -791,6 +804,19 @@ async function procesarMensaje(telefono, mensaje) {
         await enviarMensaje(telefono, 'Ya tienes una cuenta registrada.\n\nTu ID es: *' + usuarioExistente.id + '*\n\nEscribe MENU para ver las opciones.');
         return;
       }
+
+      // Antifraude: detectar ráfaga de registros nuevos en poco tiempo
+      limpiarRegistrosViejos();
+      registrosRecientes.push({ fecha: Date.now(), telefono: telLimpio });
+      if (registrosRecientes.length > LIMITE_REGISTROS_POR_HORA) {
+        await enviarMensaje('5215585567250',
+          '🚨 *ALERTA ANTIFRAUDE*\n\n' +
+          'Se detectaron *' + registrosRecientes.length + '* intentos de registro en la última hora.\n\n' +
+          'Último teléfono: +' + telLimpio + '\n\n' +
+          'Revisa si son registros legítimos.'
+        );
+      }
+
       sesiones[telefono] = { paso: 'pedir_nombre', datos: {} };
       await enviarMensaje(telefono, '✏️ *REGISTRO DE NUEVO USUARIO*\n\n¿Cual es tu nombre completo?\n\n📋 Por favor escribelo *tal como aparece en tu identificacion INE*');
       return;
@@ -804,6 +830,19 @@ async function procesarMensaje(telefono, mensaje) {
         .replace(/\s+/g, ' ')
         .toLowerCase()
         .replace(/(?:^|\s)\S/g, l => l.toUpperCase());
+
+      // Antifraude: verificación cruzada — bloquear si el teléfono ya existe (doble check por concurrencia)
+      const telefonoDuplicado = await Usuario.findOne({ telefonoLimpio: telLimpio });
+      if (telefonoDuplicado) {
+        delete sesiones[telefono];
+        await enviarMensaje(telefono,
+          '⛔ *REGISTRO NO PERMITIDO*\n\n' +
+          'Este número ya está registrado como *' + telefonoDuplicado.id + '*.\n\n' +
+          'Si crees que es un error contacta al administrador:\n' +
+          'https://wa.me/525576683884'
+        );
+        return;
+      }
 
       // Antifraude: bloquear nombre duplicado o muy similar
       const todosUsuarios = await Usuario.find({}, 'nombre id');
@@ -909,7 +948,7 @@ async function procesarMensaje(telefono, mensaje) {
       await new Promise(r => setTimeout(r, 1500));
 
       await enviarMensaje(telefono,
-        '📋 *SIGUIENTE PASO IMPORTANTE*\n\nPrestate con el administrador para recoger tu *credencial fisica* con tu codigo de usuario.\n\nSin ella no podras recoger tu despensa mensual. 🎁'
+        '📋 *SIGUIENTE PASO IMPORTANTE*\n\nPresentate con el administrador para recoger tu *credencial fisica* con tu codigo de usuario.\n\nSin ella no podras recoger tu despensa mensual. 🎁'
       );
 
       // Notificar al admin
@@ -1219,6 +1258,14 @@ async function procesarMensaje(telefono, mensaje) {
 
       const fecha = new Date();
 
+      // Antifraude: detectar múltiples comprobantes en poco tiempo (posible reuso/fraude)
+      const haceUnaHora = new Date(fecha.getTime() - 60 * 60 * 1000);
+      const comprobantesRecientes = (usuarioExistente.pagos || []).filter(p => new Date(p.fecha) > haceUnaHora);
+      let avisoFraude = '';
+      if (comprobantesRecientes.length >= 2) {
+        avisoFraude = '\n\n🚨 *ALERTA*: este usuario envió ' + (comprobantesRecientes.length + 1) + ' comprobantes en la última hora. Revisa con cuidado antes de confirmar.';
+      }
+
       await Usuario.updateOne(
         { telefono: telefono },
         { $push: { pagos: {
@@ -1248,7 +1295,8 @@ async function procesarMensaje(telefono, mensaje) {
         '💵 Monto: $' + monto + ' pesos\n' +
         '📅 ' + fecha.toLocaleDateString('es-MX') + '\n\n' +
         'Para confirmar escribe:\n*CONFIRMAR ' + usuarioExistente.id + '*\n\n' +
-        'Para rechazar escribe:\n*RECHAZAR ' + usuarioExistente.id + '*'
+        'Para rechazar escribe:\n*RECHAZAR ' + usuarioExistente.id + '*' +
+        avisoFraude
       );
       return;
     }
@@ -1381,6 +1429,30 @@ async function procesarMensaje(telefono, mensaje) {
         return;
       }
 
+      if (texto === 'ANTIFRAUDE') {
+        limpiarRegistrosViejos();
+        const todosU = await Usuario.find({}, 'telefonoLimpio pagos').lean();
+        let comprobantesUltimaHora = 0;
+        const haceUnaHora2 = new Date(Date.now() - 60 * 60 * 1000);
+        for (const u of todosU) {
+          if (u.pagos) {
+            comprobantesUltimaHora += u.pagos.filter(p => new Date(p.fecha) > haceUnaHora2).length;
+          }
+        }
+        await enviarMensaje(telefono,
+          '🛡️ *ESTADO ANTIFRAUDE*\n\n' +
+          '📝 Registros última hora: ' + registrosRecientes.length + '/' + LIMITE_REGISTROS_POR_HORA + '\n' +
+          '💰 Comprobantes última hora: ' + comprobantesUltimaHora + '\n\n' +
+          'Protecciones activas:\n' +
+          '✅ Nombres similares/duplicados\n' +
+          '✅ Teléfonos duplicados\n' +
+          '✅ Ráfaga de registros\n' +
+          '✅ Comprobantes múltiples sospechosos\n' +
+          '✅ Consumos duplicados por mes'
+        );
+        return;
+      }
+
       if (texto === 'VERIFICAR ARCHIVADO') {
         await enviarMensaje(telefono, '📦 Verificando inactividad...');
         await verificarArchivado();
@@ -1463,7 +1535,21 @@ async function procesarMensaje(telefono, mensaje) {
 
         // Si es despensa mensual: registrar consumo y comisión al patrocinador directo
         let avisoComision = '';
+        let avisoActividadInusual = '';
         if (pago.concepto === 'Despensa mensual') {
+          // Antifraude: detectar si ya tuvo un consumo de despensa este mismo mes
+          const ahora = new Date();
+          const consumosEsteMes = (userU.consumos || []).filter(c => {
+            const fc = new Date(c.fecha);
+            return c.descripcion === 'Despensa mensual' &&
+                   fc.getMonth() === ahora.getMonth() &&
+                   fc.getFullYear() === ahora.getFullYear();
+          });
+          if (consumosEsteMes.length >= 1) {
+            avisoActividadInusual = '\n\n🚨 *ACTIVIDAD INUSUAL*: ' + userU.nombre + ' (' + userU.id + ') ya registró ' + consumosEsteMes.length + ' consumo(s) de despensa este mes. Verifica que no sea un error o doble cobro.';
+            await enviarMensaje('5215585567250', avisoActividadInusual.trim());
+          }
+
           await Usuario.updateOne(
             { id: userU.id },
             { $push: { consumos: { fecha: new Date(), descripcion: 'Despensa mensual' } } }
