@@ -1869,6 +1869,195 @@ app.get('/admin/accion/:id/:accion', async function(req, res) {
   }
 });
 
+app.get('/admin/predictivo', async function(req, res) {
+  if (req.query.key !== 'despensas2026') {
+    return res.status(403).send('Acceso denegado');
+  }
+  try {
+    const hoy = new Date();
+    const todos = await Usuario.find({}).lean();
+    const activos = todos.filter(u => u.activo && !u.congelado);
+    const exentos = todos.filter(u => USUARIOS_EXENTOS.includes(u.id));
+    const noExentos = todos.filter(u => !USUARIOS_EXENTOS.includes(u.id));
+    const activosNoExentos = activos.filter(u => !USUARIOS_EXENTOS.includes(u.id));
+
+    // Ingresos mensuales históricos (últimos 6 meses)
+    const ingresosPorMes = {};
+    for (let i = 5; i >= 0; i--) {
+      const fecha = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+      const clave = fecha.toLocaleDateString('es-MX', { month: 'short', year: '2-digit' });
+      ingresosPorMes[clave] = 0;
+    }
+    for (const u of todos) {
+      if (!u.pagos) continue;
+      for (const p of u.pagos) {
+        if (p.estado !== 'confirmado') continue;
+        const fp = new Date(p.fecha);
+        const clave = fp.toLocaleDateString('es-MX', { month: 'short', year: '2-digit' });
+        if (ingresosPorMes.hasOwnProperty(clave)) {
+          ingresosPorMes[clave] += p.monto || 0;
+        }
+      }
+    }
+    const valoresIngresos = Object.values(ingresosPorMes);
+    const promedioIngresoMensual = valoresIngresos.reduce((a, b) => a + b, 0) / (valoresIngresos.filter(v => v > 0).length || 1);
+
+    // Proyección próximo mes: usuarios activos esperados x precio despensa
+    const ingresoProyectadoDespensas = activosNoExentos.length * CONFIG_PRECIOS.despensa;
+
+    // Renovaciones esperadas próximos 30 días
+    const renovacionesProximas = todos.filter(u => {
+      if (!u.vigencia) return false;
+      const dias = Math.ceil((new Date(u.vigencia) - hoy) / (1000 * 60 * 60 * 24));
+      return dias > 0 && dias <= 30;
+    });
+    const ingresoProyectadoRenovaciones = renovacionesProximas.length * CONFIG_PRECIOS.membresia;
+
+    const ingresoProyectadoTotal = ingresoProyectadoDespensas + ingresoProyectadoRenovaciones;
+
+    // Tasa de abandono: congelados+inactivos / total no exentos
+    const congeladosInactivos = noExentos.filter(u => u.congelado || !u.activo).length;
+    const tasaAbandono = noExentos.length > 0 ? ((congeladosInactivos / noExentos.length) * 100).toFixed(1) : '0.0';
+
+    // Crecimiento de red: registros por mes (últimos 6 meses)
+    const registrosPorMes = {};
+    for (let i = 5; i >= 0; i--) {
+      const fecha = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+      const clave = fecha.toLocaleDateString('es-MX', { month: 'short', year: '2-digit' });
+      registrosPorMes[clave] = 0;
+    }
+    for (const u of todos) {
+      const fr = new Date(u.fechaRegistro);
+      const clave = fr.toLocaleDateString('es-MX', { month: 'short', year: '2-digit' });
+      if (registrosPorMes.hasOwnProperty(clave)) {
+        registrosPorMes[clave]++;
+      }
+    }
+    const valoresRegistros = Object.values(registrosPorMes);
+    const crecimientoPromedioMensual = (valoresRegistros.reduce((a, b) => a + b, 0) / 6).toFixed(1);
+    const ultimoMes = valoresRegistros[valoresRegistros.length - 1];
+    const penultimoMes = valoresRegistros[valoresRegistros.length - 2] || 0;
+    const tendencia = ultimoMes >= penultimoMes ? '📈 Creciendo' : '📉 Bajando';
+
+    // Comisiones totales pendientes de pago a patrocinadores
+    let comisionesPendientes = 0;
+    for (const u of todos) {
+      if (u.comisiones) {
+        comisionesPendientes += u.comisiones.filter(c => !c.pagada).reduce((s, c) => s + c.monto, 0);
+      }
+    }
+
+    const maxBarraIngresos = Math.max(...valoresIngresos, 1);
+    const maxBarraRegistros = Math.max(...valoresRegistros, 1);
+
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard Predictivo — DespensaClub</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #1a1a2e; color: #fff; padding: 16px; }
+    h1 { text-align: center; color: #25D366; font-size: 19px; margin-bottom: 4px; }
+    .sub { text-align: center; color: #aaa; font-size: 12px; margin-bottom: 20px; }
+    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 16px; }
+    .card { background: #16213e; border-radius: 12px; padding: 16px; text-align: center; }
+    .card-num { font-size: 26px; font-weight: bold; }
+    .card-label { font-size: 11px; color: #aaa; margin-top: 4px; }
+    .verde .card-num { color: #25D366; }
+    .amarillo .card-num { color: #FFC107; }
+    .rojo .card-num { color: #f44336; }
+    .azul .card-num { color: #2196F3; }
+    .morado .card-num { color: #9C27B0; }
+    .seccion { background: #16213e; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .seccion h3 { font-size: 13px; color: #25D366; margin-bottom: 14px; }
+    .grafico { display: flex; align-items: flex-end; gap: 8px; height: 100px; margin-bottom: 8px; }
+    .barra-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; }
+    .barra { width: 100%; background: #25D366; border-radius: 4px 4px 0 0; min-height: 2px; }
+    .barra.registros { background: #2196F3; }
+    .barra-label { font-size: 9px; color: #aaa; margin-top: 4px; }
+    .barra-valor { font-size: 9px; color: #fff; margin-bottom: 2px; }
+    .nota { font-size: 11px; color: #888; margin-top: 8px; line-height: 1.5; }
+    .back { display: block; text-align: center; margin-top: 16px; color: #25D366; text-decoration: none; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>📈 Dashboard Predictivo</h1>
+  <p class="sub">DespensaClub Familiar — Proyecciones</p>
+
+  <div class="grid">
+    <div class="card verde">
+      <div class="card-num">$${ingresoProyectadoTotal}</div>
+      <div class="card-label">💰 Ingreso proyectado próx. 30 días</div>
+    </div>
+    <div class="card azul">
+      <div class="card-num">${renovacionesProximas.length}</div>
+      <div class="card-label">🔄 Renovaciones esperadas</div>
+    </div>
+    <div class="card ${tasaAbandono > 20 ? 'rojo' : 'amarillo'}">
+      <div class="card-num">${tasaAbandono}%</div>
+      <div class="card-label">📉 Tasa de abandono</div>
+    </div>
+    <div class="card morado">
+      <div class="card-num">+${crecimientoPromedioMensual}</div>
+      <div class="card-label">👥 Crecimiento prom./mes</div>
+    </div>
+    <div class="card verde">
+      <div class="card-num">$${Math.round(promedioIngresoMensual)}</div>
+      <div class="card-label">💵 Ingreso promedio mensual</div>
+    </div>
+    <div class="card amarillo">
+      <div class="card-num">$${comisionesPendientes}</div>
+      <div class="card-label">🎁 Comisiones por pagar</div>
+    </div>
+  </div>
+
+  <div class="seccion">
+    <h3>💰 Ingresos confirmados — últimos 6 meses</h3>
+    <div class="grafico">
+      ${Object.entries(ingresosPorMes).map(([mes, val]) => `
+        <div class="barra-wrap">
+          <div class="barra-valor">$${val}</div>
+          <div class="barra" style="height:${Math.max((val / maxBarraIngresos) * 80, 2)}px"></div>
+          <div class="barra-label">${mes}</div>
+        </div>
+      `).join('')}
+    </div>
+  </div>
+
+  <div class="seccion">
+    <h3>👥 Crecimiento de red — últimos 6 meses ${tendencia}</h3>
+    <div class="grafico">
+      ${Object.entries(registrosPorMes).map(([mes, val]) => `
+        <div class="barra-wrap">
+          <div class="barra-valor">${val}</div>
+          <div class="barra registros" style="height:${Math.max((val / maxBarraRegistros) * 80, 2)}px"></div>
+          <div class="barra-label">${mes}</div>
+        </div>
+      `).join('')}
+    </div>
+    <div class="nota">Nuevos registros por mes, incluyendo DESP-000110/111.</div>
+  </div>
+
+  <div class="seccion">
+    <h3>ℹ️ Cómo se calculan estas proyecciones</h3>
+    <div class="nota">
+      • <strong>Ingreso proyectado:</strong> usuarios activos × $${CONFIG_PRECIOS.despensa} (despensa) + membresías por vencer × $${CONFIG_PRECIOS.membresia}.<br><br>
+      • <strong>Tasa de abandono:</strong> % de usuarios congelados o inactivos sobre el total (excluyendo DESP-000110/111).<br><br>
+      • <strong>Crecimiento:</strong> promedio de nuevos registros por mes en los últimos 6 meses.<br><br>
+      Estas son estimaciones basadas en el comportamiento actual, no garantías.
+    </div>
+  </div>
+
+  <a class="back" href="/admin/dashboard?key=despensas2026">← Volver al Dashboard</a>
+</body>
+</html>`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
 app.get('/admin/dashboard', async function(req, res) {
   if (req.query.key !== 'despensas2026') {
     return res.status(403).send('Acceso denegado');
@@ -2020,6 +2209,7 @@ app.get('/admin/dashboard', async function(req, res) {
 
   <div class="links">
     <a class="btn" href="/admin/dashboard?key=despensas2026">📊 Dashboard</a>
+    <a class="btn" href="/admin/predictivo?key=despensas2026">📈 Predictivo</a>
     <a class="btn" href="/admin/usuarios?key=despensas2026">👥 Usuarios</a>
     <a class="btn" href="/admin/arbol?key=despensas2026">🌳 Árbol</a>
     <a class="btn" href="/admin/lista?key=despensas2026">📋 Lista</a>
