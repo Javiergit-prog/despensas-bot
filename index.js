@@ -846,6 +846,25 @@ async function procesarMensaje(telefono, mensaje) {
       return;
     }
 
+    // ── COMANDO MI PORTAL (login OTP para usuario)
+    if (texto === 'MI PORTAL' || texto === 'MIPORTAL') {
+      if (!usuarioExistente) {
+        await enviarMensaje(telefono, '❌ No tienes cuenta registrada.\n\nEscribe *MENU* para registrarte.');
+        return;
+      }
+      const codigo = generarOTP();
+      otpSesiones[usuarioExistente.id] = { codigo: codigo, expira: Date.now() + 5 * 60 * 1000 };
+      await enviarMensaje(telefono,
+        '🔐 *ACCESO A TU PORTAL*\n\n' +
+        'Tu código de acceso es:\n\n' +
+        '*' + codigo + '*\n\n' +
+        '⏱️ Válido por *5 minutos*\n\n' +
+        '🌐 Ingresa aquí:\n' +
+        'https://despensas-bot-production.up.railway.app/portal?id=' + usuarioExistente.id
+      );
+      return;
+    }
+
     // ── OPCION 3: INVITAR
     if (sesion.paso === 'menu' && texto === '3') {
       if (!usuarioExistente) {
@@ -1944,6 +1963,153 @@ app.get('/admin/arbol', async function(req, res) {
   </div>
 
   <button class="btn-refresh" onclick="location.reload()">🔄 Actualizar</button>
+</body>
+</html>`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+app.get('/portal', async function(req, res) {
+  const { id, otp } = req.query;
+  if (!id) {
+    return res.send(`
+      <html><body style="font-family:sans-serif;max-width:400px;margin:100px auto;text-align:center;background:#1a1a2e;color:#fff;padding:20px">
+        <h2>🛒 Portal DespensaClub</h2>
+        <p>Manda <b>MI PORTAL</b> por WhatsApp al bot para recibir tu enlace de acceso.</p>
+      </body></html>
+    `);
+  }
+
+  const idU = id.toUpperCase();
+
+  if (!otp) {
+    return res.send(`
+      <html><body style="font-family:sans-serif;max-width:400px;margin:100px auto;text-align:center;background:#1a1a2e;color:#fff;padding:20px">
+        <h2>🔐 Portal — ${idU}</h2>
+        <p style="color:#aaa;font-size:13px">Ingresa el código de 6 dígitos que recibiste por WhatsApp</p>
+        <form method="GET">
+          <input type="hidden" name="id" value="${idU}">
+          <input name="otp" placeholder="000000" maxlength="6"
+            style="padding:12px;font-size:20px;width:160px;text-align:center;letter-spacing:6px;border-radius:8px;border:none;margin-top:16px">
+          <br><br>
+          <button type="submit" style="padding:12px 30px;background:#25D366;color:#000;border:none;border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer">
+            Entrar
+          </button>
+        </form>
+      </body></html>
+    `);
+  }
+
+  if (!otpValido(idU, otp)) {
+    return res.send(`
+      <html><body style="font-family:sans-serif;max-width:400px;margin:100px auto;text-align:center;background:#1a1a2e;color:#fff;padding:20px">
+        <h2>❌ Código incorrecto o expirado</h2>
+        <p style="color:#aaa">Manda <b>MI PORTAL</b> nuevamente por WhatsApp.</p>
+        <a href="/portal?id=${idU}" style="color:#25D366">Intentar de nuevo</a>
+      </body></html>
+    `);
+  }
+
+  try {
+    const u = await Usuario.findOne({ id: idU }).lean();
+    if (!u) return res.status(404).send('Usuario no encontrado');
+
+    const COLORES_HEX = {
+      0: '#7B2FBE', 1: '#F5A623', 2: '#2196F3', 3: '#FF6B2B',
+      4: '#E91E8C', 5: '#4CAF50', 6: '#FFC107', 7: '#00BCD4',
+      8: '#1B5E20', 9: '#9E9E9E'
+    };
+    const COLORES_NOMBRE = {
+      0: 'VIOLETA', 1: 'DORADO', 2: 'AZUL', 3: 'NARANJA', 4: 'ROSA',
+      5: 'VERDE', 6: 'AMARILLO', 7: 'TURQUESA', 8: 'VERDE BANDERA', 9: 'GRIS'
+    };
+    const color = COLORES_HEX[u.nivel || 0] || '#7B2FBE';
+    const vigenciaStr = u.vigencia ? new Date(u.vigencia).toLocaleDateString('es-MX') : 'N/A';
+
+    // Buscar nombres de referidos
+    const referidosInfo = u.referidos && u.referidos.length > 0
+      ? await Usuario.find({ id: { $in: u.referidos } }, 'id nombre activo').lean()
+      : [];
+
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mi Portal — ${u.id}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #1a1a2e; color: #fff; padding: 16px; }
+    .header { background: ${color}; border-radius: 14px; padding: 20px; text-align: center; margin-bottom: 16px; }
+    .nombre { font-size: 18px; font-weight: bold; }
+    .id { font-size: 13px; opacity: 0.85; margin-top: 4px; }
+    .nivel-badge { background: rgba(255,255,255,0.25); border-radius: 20px; padding: 4px 14px; font-size: 11px; font-weight: bold; display: inline-block; margin-top: 8px; }
+    .seccion { background: #16213e; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+    .seccion h3 { font-size: 13px; color: #25D366; margin-bottom: 10px; }
+    .fila { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #0f3460; font-size: 12px; }
+    .fila:last-child { border-bottom: none; }
+    .fila-label { color: #aaa; }
+    .item { padding: 8px 0; border-bottom: 1px solid #0f3460; font-size: 12px; }
+    .item:last-child { border-bottom: none; }
+    .estado-conf { color: #25D366; }
+    .estado-pend { color: #FFC107; }
+    .estado-rech { color: #f44336; }
+    .vacio { color: #666; font-size: 12px; }
+    .btn-cred { display: block; text-align: center; padding: 12px; background: ${color}; color: #fff; border-radius: 10px; text-decoration: none; font-weight: bold; font-size: 14px; margin-bottom: 16px; }
+    .ref-activo { color: #25D366; }
+    .ref-inactivo { color: #f44336; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="nombre">${u.nombre.toUpperCase()}</div>
+    <div class="id">${u.id}</div>
+    <div class="nivel-badge">NIVEL ${u.nivel || 0} — ${COLORES_NOMBRE[u.nivel || 0]}</div>
+  </div>
+
+  <a class="btn-cred" href="/credencial/${u.id}" target="_blank">🪪 Ver mi credencial digital</a>
+
+  <div class="seccion">
+    <h3>📋 Mi información</h3>
+    <div class="fila"><span class="fila-label">Estado</span><span>${u.congelado ? '❄️ Congelado' : u.activo ? '✅ Activo' : '❌ Inactivo'}</span></div>
+    <div class="fila"><span class="fila-label">📅 Registro</span><span>${new Date(u.fechaRegistro).toLocaleDateString('es-MX')}</span></div>
+    <div class="fila"><span class="fila-label">⏳ Vigencia</span><span>${vigenciaStr}</span></div>
+    <div class="fila"><span class="fila-label">👥 Referido por</span><span>${u.referidoPor || 'Directo'}</span></div>
+  </div>
+
+  <div class="seccion">
+    <h3>👥 Mis referidos (${referidosInfo.length}/4)</h3>
+    ${referidosInfo.length > 0 ? referidosInfo.map(r => `
+      <div class="item">
+        <span class="${r.activo ? 'ref-activo' : 'ref-inactivo'}">${r.activo ? '✅' : '❌'}</span>
+        ${r.nombre} — ${r.id}
+      </div>
+    `).join('') : '<div class="vacio">Aún no tienes referidos. ¡Invita a tus familiares y amigos!</div>'}
+  </div>
+
+  <div class="seccion">
+    <h3>💰 Historial de pagos</h3>
+    ${u.pagos && u.pagos.length > 0 ? [...u.pagos].reverse().map(p => `
+      <div class="item">
+        <div class="${p.estado === 'confirmado' ? 'estado-conf' : p.estado === 'pendiente' ? 'estado-pend' : 'estado-rech'}">
+          ${p.estado === 'confirmado' ? '✅' : p.estado === 'pendiente' ? '⏳' : '❌'} ${p.estado.toUpperCase()}
+        </div>
+        <div>${p.concepto || 'Pago'} — $${p.monto} pesos</div>
+        <div style="color:#aaa">${new Date(p.fecha).toLocaleDateString('es-MX')}</div>
+      </div>
+    `).join('') : '<div class="vacio">Sin pagos registrados</div>'}
+  </div>
+
+  <div class="seccion">
+    <h3>📦 Historial de consumos</h3>
+    ${u.consumos && u.consumos.length > 0 ? [...u.consumos].reverse().map(c => `
+      <div class="item">
+        <div>📦 ${c.descripcion || 'Despensa'}</div>
+        <div style="color:#aaa">${new Date(c.fecha).toLocaleDateString('es-MX')}</div>
+      </div>
+    `).join('') : '<div class="vacio">Sin consumos registrados</div>'}
+  </div>
 </body>
 </html>`);
   } catch (err) {
