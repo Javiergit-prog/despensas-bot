@@ -50,6 +50,7 @@ const usuarioSchema = new mongoose.Schema({
   }],
   ineUrl: String,
   ineFecha: Date,
+  notasAdmin: String,
   activo: { type: Boolean, default: true },
   congelado: { type: Boolean, default: false },
   archivado: { type: Boolean, default: false },
@@ -1972,6 +1973,20 @@ app.get('/admin/usuarios', async function(req, res) {
 });
 
 // Vista detallada de usuario individual
+// Guardar nota del administrador sobre un usuario
+app.post('/admin/usuario/:id/nota', async function(req, res) {
+  if (req.query.key !== 'abb46f223b7cec4e6e3781421d2d1cd5') {
+    return res.status(403).send('Acceso denegado');
+  }
+  try {
+    const idU = req.params.id.toUpperCase();
+    await Usuario.updateOne({ id: idU }, { notasAdmin: req.body.nota || '' });
+    res.redirect('/admin/usuario/' + idU + '?key=abb46f223b7cec4e6e3781421d2d1cd5');
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
 app.get('/admin/usuario/:id', async function(req, res) {
   if (req.query.key !== 'abb46f223b7cec4e6e3781421d2d1cd5') {
     return res.status(403).send('Acceso denegado');
@@ -2012,25 +2027,43 @@ app.get('/admin/usuario/:id', async function(req, res) {
     .estado-rech { color: #f44336; }
     .vacio { color: #666; font-size: 12px; }
     .acciones { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
-    .btn { padding: 10px; border-radius: 8px; text-align: center; font-size: 12px; font-weight: bold; text-decoration: none; display: block; }
+    .btn { padding: 10px; border-radius: 8px; text-align: center; font-size: 12px; font-weight: bold; text-decoration: none; display: block; cursor: pointer; border: none; }
     .btn-confirmar { background: #1b5e20; color: #fff; }
     .btn-desactivar { background: #b71c1c; color: #fff; }
     .btn-activar { background: #0d47a1; color: #fff; }
     .btn-cred { background: #7B2FBE; color: #fff; }
+    .btn-imprimir { background: #444; color: #fff; }
     .back { display: block; text-align: center; margin-top: 16px; color: #25D366; text-decoration: none; font-size: 13px; }
+    .alerta-archivado { background: #5d4037; border-radius: 8px; padding: 10px; margin-bottom: 12px; font-size: 12px; }
+    textarea { width: 100%; min-height: 70px; background: #0f3460; color: #fff; border: none; border-radius: 8px; padding: 10px; font-size: 12px; font-family: sans-serif; resize: vertical; }
+    .btn-guardar-nota { margin-top: 8px; padding: 8px 16px; background: #25D366; color: #000; border-radius: 8px; border: none; font-size: 12px; font-weight: bold; cursor: pointer; }
+    @media print {
+      body { background: #fff; color: #000; }
+      .seccion { background: #f5f5f5; border: 1px solid #ccc; }
+      .acciones, .back, .btn-guardar-nota { display: none !important; }
+    }
   </style>
 </head>
 <body>
   <div class="header">
     <div class="nombre">${u.nombre.toUpperCase()}</div>
     <div class="id">${u.id} — Nivel ${u.nivel || 0}</div>
-    <div style="margin-top:6px;font-size:12px">${u.congelado ? '❄️ Congelado' : u.activo ? '✅ Activo' : '❌ Inactivo'}</div>
+    <div style="margin-top:6px;font-size:12px">${u.congelado ? '❄️ Congelado' : u.activo ? '✅ Activo' : '❌ Inactivo'}${u.archivado ? ' 📦 Archivado' : ''}</div>
   </div>
+
+  ${u.archivado ? `
+  <div class="alerta-archivado">
+    📦 Este usuario fue <strong>archivado</strong> el ${new Date(u.fechaArchivado).toLocaleDateString('es-MX')} por inactividad.
+    Usa <strong>REACTIVAR ${u.id}</strong> por WhatsApp para recuperarlo.
+  </div>` : ''}
 
   <div class="acciones">
     <a class="btn btn-cred" href="/credencial/${u.id}" target="_blank">🪪 Ver credencial</a>
     ${u.activo ? `<a class="btn btn-desactivar" href="/admin/accion/${u.id}/desactivar?key=abb46f223b7cec4e6e3781421d2d1cd5">❌ Desactivar</a>` :
                  `<a class="btn btn-activar" href="/admin/accion/${u.id}/activar?key=abb46f223b7cec4e6e3781421d2d1cd5">✅ Activar</a>`}
+  </div>
+  <div class="acciones">
+    <button class="btn btn-imprimir" onclick="window.print()" style="grid-column: span 2;">🖨️ Imprimir / Exportar expediente</button>
   </div>
 
   <div class="seccion">
@@ -2064,6 +2097,29 @@ app.get('/admin/usuario/:id', async function(req, res) {
         <div style="color:#aaa">${new Date(c.fecha).toLocaleDateString('es-MX')}</div>
       </div>
     `).join('') : '<div class="vacio">Sin consumos registrados</div>'}
+  </div>
+
+  <div class="seccion">
+    <h3>💰 Comisiones generadas</h3>
+    ${u.comisiones && u.comisiones.length > 0 ? `
+      <div class="fila" style="font-weight:bold">
+        <span>Total acumulado</span><span class="estado-conf">$${u.comisiones.reduce((s,c) => s + c.monto, 0)} pesos</span>
+      </div>
+      ${[...u.comisiones].reverse().map(c => `
+        <div class="pago-item">
+          <div>💵 $${c.monto} — de ${c.deNombre}</div>
+          <div style="color:#aaa">${new Date(c.fecha).toLocaleDateString('es-MX')} ${c.pagada ? '✅ Pagada' : '⏳ Pendiente'}</div>
+        </div>
+      `).join('')}
+    ` : '<div class="vacio">Sin comisiones generadas</div>'}
+  </div>
+
+  <div class="seccion">
+    <h3>📝 Notas del administrador</h3>
+    <form method="POST" action="/admin/usuario/${u.id}/nota?key=abb46f223b7cec4e6e3781421d2d1cd5">
+      <textarea name="nota" placeholder="Escribe notas internas sobre este usuario (no visibles para él)...">${u.notasAdmin || ''}</textarea>
+      <button type="submit" class="btn-guardar-nota">💾 Guardar nota</button>
+    </form>
   </div>
 
   <a class="back" href="/admin/usuarios?key=abb46f223b7cec4e6e3781421d2d1cd5">← Volver a lista</a>
