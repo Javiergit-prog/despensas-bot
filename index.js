@@ -113,6 +113,26 @@ function generarID(contador) {
 }
 
 // ============================================================
+// ASIGNACIÓN INTELIGENTE DE POSICIONES
+// ============================================================
+// Busca un lugar disponible (menos de 4 referidos) balanceado por niveles:
+// recorre nivel por nivel desde la raíz hasta encontrar el primer hueco.
+async function buscarPosicionDisponible() {
+  const todos = await Usuario.find({}, 'id nivel referidos').lean();
+  if (todos.length === 0) return null; // No hay nadie todavía
+
+  const nivelMax = Math.max(...todos.map(u => u.nivel || 0));
+
+  for (let nv = 0; nv <= nivelMax; nv++) {
+    const candidatos = todos
+      .filter(u => (u.nivel || 0) === nv && (u.referidos ? u.referidos.length : 0) < 4)
+      .sort((a, b) => (a.referidos ? a.referidos.length : 0) - (b.referidos ? b.referidos.length : 0));
+    if (candidatos.length > 0) return candidatos[0].id;
+  }
+  return null; // Red completamente llena (caso extremo)
+}
+
+// ============================================================
 // SESIONES EN MEMORIA
 // ============================================================
 const sesiones = {};
@@ -720,6 +740,9 @@ async function procesarMensaje(telefono, mensaje) {
           return;
         }
         referidoPor = codigoReferido;
+      } else {
+        // Sin código: asignación automática inteligente balanceada por niveles
+        referidoPor = await buscarPosicionDisponible();
       }
 
       // Calcular nivel
