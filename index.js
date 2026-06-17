@@ -41,6 +41,13 @@ const usuarioSchema = new mongoose.Schema({
     fecha: Date,
     descripcion: String
   }],
+  comisiones: [{
+    monto: Number,
+    deUsuario: String,
+    deNombre: String,
+    fecha: Date,
+    pagada: { type: Boolean, default: false }
+  }],
   activo: { type: Boolean, default: true },
   congelado: { type: Boolean, default: false }
 });
@@ -82,6 +89,15 @@ app.use(express.urlencoded({ extended: true }));
 const WASENDER_TOKEN = process.env.WASENDER_TOKEN || '';
 const WASENDER_URL = 'https://api.wasenderapi.com/api/send-message';
 const ADMIN_PHONE = process.env.ADMIN_PHONE || '';
+
+// ============================================================
+// PRECIOS Y COMISIONES (configurables)
+// ============================================================
+const CONFIG_PRECIOS = {
+  membresia: 50,
+  despensa: 250,
+  comisionReferido: 20
+};
 
 const COLORES_NIVEL = {
   0: 'VIOLETA', 1: 'DORADO', 2: 'AZUL',
@@ -846,6 +862,35 @@ async function procesarMensaje(telefono, mensaje) {
       return;
     }
 
+    // ── COMANDO MIS COMISIONES
+    if (texto === 'MIS COMISIONES' || texto === 'MISCOMISIONES') {
+      if (!usuarioExistente) {
+        await enviarMensaje(telefono, '❌ No tienes cuenta registrada.\n\nEscribe *MENU* para registrarte.');
+        return;
+      }
+      const comisiones = usuarioExistente.comisiones || [];
+      const totalAcumulado = comisiones.reduce((s, c) => s + c.monto, 0);
+      const pendientes = comisiones.filter(c => !c.pagada);
+      const totalPendiente = pendientes.reduce((s, c) => s + c.monto, 0);
+
+      let detalle = '';
+      if (comisiones.length > 0) {
+        detalle = [...comisiones].reverse().slice(0, 10).map(c =>
+          '• $' + c.monto + ' — de ' + c.deNombre + ' (' + new Date(c.fecha).toLocaleDateString('es-MX') + ')' +
+          (c.pagada ? ' ✅' : ' ⏳')
+        ).join('\n');
+      }
+
+      await enviarMensaje(telefono,
+        '💰 *MIS COMISIONES*\n' +
+        '━━━━━━━━━━━━━━━━━━━━\n\n' +
+        '💵 Total acumulado: *$' + totalAcumulado + ' pesos*\n' +
+        '⏳ Pendiente de pago: *$' + totalPendiente + ' pesos*\n\n' +
+        (detalle ? '*Últimas comisiones:*\n' + detalle : 'Aún no tienes comisiones generadas.\n\n¡Invita a tus familiares y gana $' + CONFIG_PRECIOS.comisionReferido + ' por cada despensa que consuman!')
+      );
+      return;
+    }
+
     // ── COMANDO MI PORTAL (login OTP para usuario)
     if (texto === 'MI PORTAL' || texto === 'MIPORTAL') {
       if (!usuarioExistente) {
@@ -920,8 +965,8 @@ async function procesarMensaje(telefono, mensaje) {
       await enviarMensaje(telefono,
         '💰 *REGISTRAR PAGO*\n\n' +
         '¿Qué concepto vas a pagar?\n\n' +
-        '1️⃣ Membresía anual — *$50 pesos*\n' +
-        '2️⃣ Despensa mensual — *$250 pesos*\n\n' +
+        '1️⃣ Membresía anual — *$' + CONFIG_PRECIOS.membresia + ' pesos*\n' +
+        '2️⃣ Despensa mensual — *$' + CONFIG_PRECIOS.despensa + ' pesos*\n\n' +
         'Responde con *1* o *2*'
       );
       return;
@@ -933,7 +978,7 @@ async function procesarMensaje(telefono, mensaje) {
         return;
       }
       const concepto = texto === '1' ? 'Membresía anual' : 'Despensa mensual';
-      const monto = texto === '1' ? 50 : 250;
+      const monto = texto === '1' ? CONFIG_PRECIOS.membresia : CONFIG_PRECIOS.despensa;
       sesiones[telefono] = { paso: 'esperar_comprobante', datos: { concepto, monto } };
       await enviarMensaje(telefono,
         '📸 *SUBE TU COMPROBANTE*\n\n' +
@@ -1087,12 +1132,45 @@ async function procesarMensaje(telefono, mensaje) {
         await userU.save();
         const pago = userU.pagos[pagoIdx];
 
+        // Si es despensa mensual: registrar consumo y comisión al patrocinador directo
+        let avisoComision = '';
+        if (pago.concepto === 'Despensa mensual') {
+          await Usuario.updateOne(
+            { id: userU.id },
+            { $push: { consumos: { fecha: new Date(), descripcion: 'Despensa mensual' } } }
+          );
+
+          if (userU.referidoPor) {
+            const patrocinador = await Usuario.findOne({ id: userU.referidoPor });
+            if (patrocinador) {
+              await Usuario.updateOne(
+                { id: patrocinador.id },
+                { $push: { comisiones: {
+                  monto: CONFIG_PRECIOS.comisionReferido,
+                  deUsuario: userU.id,
+                  deNombre: userU.nombre,
+                  fecha: new Date(),
+                  pagada: false
+                }}}
+              );
+              await enviarMensaje(patrocinador.telefono,
+                '💰 *COMISIÓN GENERADA*\n\n' +
+                'Tu referido *' + userU.nombre + '* (' + userU.id + ') confirmó su pago de despensa.\n\n' +
+                '🎁 Comisión: *$' + CONFIG_PRECIOS.comisionReferido + ' pesos*\n\n' +
+                'Escribe *MIS COMISIONES* para ver tu total acumulado.'
+              );
+              avisoComision = '\n💰 Comisión de $' + CONFIG_PRECIOS.comisionReferido + ' generada para ' + patrocinador.id;
+            }
+          }
+        }
+
         await enviarMensaje(telefono,
           '✅ *PAGO CONFIRMADO*\n\n' +
           '👤 ' + userU.nombre + '\n' +
           '🪪 ' + idU + '\n' +
           '💵 ' + pago.concepto + ' — $' + pago.monto + ' pesos' +
-          (estabaCongelado ? '\n\n❄️➡️✅ Cuenta reactivada automáticamente.' : '')
+          (estabaCongelado ? '\n\n❄️➡️✅ Cuenta reactivada automáticamente.' : '') +
+          avisoComision
         );
 
         await enviarMensaje(userU.telefono,
@@ -2086,6 +2164,21 @@ app.get('/portal', async function(req, res) {
         ${r.nombre} — ${r.id}
       </div>
     `).join('') : '<div class="vacio">Aún no tienes referidos. ¡Invita a tus familiares y amigos!</div>'}
+  </div>
+
+  <div class="seccion">
+    <h3>💰 Mis comisiones</h3>
+    ${u.comisiones && u.comisiones.length > 0 ? `
+      <div class="item" style="font-weight:bold;color:#25D366">
+        Total acumulado: $${u.comisiones.reduce((s,c) => s + c.monto, 0)} pesos
+      </div>
+      ${[...u.comisiones].reverse().map(c => `
+        <div class="item">
+          <div>💵 $${c.monto} — de ${c.deNombre}</div>
+          <div style="color:#aaa">${new Date(c.fecha).toLocaleDateString('es-MX')} ${c.pagada ? '✅ Pagada' : '⏳ Pendiente'}</div>
+        </div>
+      `).join('')}
+    ` : '<div class="vacio">Aún no tienes comisiones generadas</div>'}
   </div>
 
   <div class="seccion">
