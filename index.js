@@ -48,6 +48,8 @@ const usuarioSchema = new mongoose.Schema({
     fecha: Date,
     pagada: { type: Boolean, default: false }
   }],
+  ineUrl: String,
+  ineFecha: Date,
   activo: { type: Boolean, default: true },
   congelado: { type: Boolean, default: false },
   archivado: { type: Boolean, default: false },
@@ -933,6 +935,51 @@ async function procesarMensaje(telefono, mensaje) {
         '📱 Ábrela desde tu celular o computadora e imprímela.'
       );
 
+      // Aviso de privacidad y solicitud de INE para expediente
+      await new Promise(r => setTimeout(r, 2000));
+      sesiones[telefono] = { paso: 'esperar_ine', datos: { idUsuario: nuevoID } };
+      await enviarMensaje(telefono,
+        '🔒 *AVISO DE PRIVACIDAD*\n\n' +
+        'Para tu expediente, te pedimos una foto de tu identificación oficial (INE).\n\n' +
+        '📋 Esta imagen:\n' +
+        '• Se guarda únicamente como respaldo documental\n' +
+        '• No se procesa ni se comparte con terceros\n' +
+        '• Solo el administrador puede consultarla en caso de ser necesario\n' +
+        '• Puedes solicitar su eliminación en cualquier momento escribiendo *ELIMINAR MI INE*\n\n' +
+        '📸 Envía una foto de tu INE (frente), o escribe *OMITIR* si prefieres no hacerlo ahora.'
+      );
+
+      return;
+    }
+
+    // ── ESPERAR FOTO DE INE PARA EXPEDIENTE
+    if (sesion.paso === 'esperar_ine') {
+      if (texto.toUpperCase() === 'OMITIR') {
+        delete sesiones[telefono];
+        await enviarMensaje(telefono, '✅ Entendido, puedes enviarla más adelante escribiendo *MENU* si cambias de opinión.');
+        return;
+      }
+
+      if (texto !== '__IMAGEN__') {
+        await enviarMensaje(telefono, '📸 Por favor envía una *foto* de tu INE, o escribe *OMITIR*.');
+        return;
+      }
+
+      const idUsuarioIne = sesion.datos.idUsuario;
+
+      await Usuario.updateOne(
+        { id: idUsuarioIne },
+        { ineUrl: 'enviada_por_whatsapp', ineFecha: new Date() }
+      );
+
+      delete sesiones[telefono];
+      await enviarMensaje(telefono, '✅ INE recibida y guardada en tu expediente. ¡Gracias!');
+
+      await enviarMensaje('5215585567250',
+        '🪪 *INE RECIBIDA*\n\n' +
+        'Usuario: ' + idUsuarioIne + '\n' +
+        'Revísala en este mismo chat de WhatsApp (arriba en el historial).'
+      );
       return;
     }
 
@@ -993,6 +1040,33 @@ async function procesarMensaje(telefono, mensaje) {
       }
       sesiones[telefono] = { paso: 'menu', datos: {} };
       await procesarMensaje(telefono, '2');
+      return;
+    }
+
+    // ── COMANDO ELIMINAR MI INE (derecho de cancelación)
+    if (texto === 'ELIMINAR MI INE' || texto === 'ELIMINARMIINE') {
+      if (!usuarioExistente) {
+        await enviarMensaje(telefono, '❌ No tienes cuenta registrada.');
+        return;
+      }
+      if (!usuarioExistente.ineUrl) {
+        await enviarMensaje(telefono, 'ℹ️ No tenemos ninguna INE guardada en tu expediente.');
+        return;
+      }
+      await Usuario.updateOne(
+        { id: usuarioExistente.id },
+        { $unset: { ineUrl: '', ineFecha: '' } }
+      );
+      await enviarMensaje(telefono,
+        '✅ *INE ELIMINADA*\n\n' +
+        'Hemos eliminado el registro de tu identificación de nuestro expediente.\n\n' +
+        'Esto no afecta el resto de tu cuenta ni tu membresía.'
+      );
+      await enviarMensaje('5215585567250',
+        '🗑️ *INE ELIMINADA POR SOLICITUD*\n\n' +
+        'Usuario: ' + usuarioExistente.nombre + ' (' + usuarioExistente.id + ')\n' +
+        'Ejerció su derecho de cancelación.'
+      );
       return;
     }
 
@@ -1785,7 +1859,7 @@ app.get('/credencial/:id', async function(req, res) {
 });
 
 app.get('/admin/usuarios', async function(req, res) {
-  if (req.query.key !== 'despensas2026') {
+  if (req.query.key !== 'abb46f223b7cec4e6e3781421d2d1cd5') {
     return res.status(403).send('Acceso denegado');
   }
   try {
@@ -1842,7 +1916,7 @@ app.get('/admin/usuarios', async function(req, res) {
   <p class="sub">DespensaClub Familiar</p>
 
   <form method="GET">
-    <input type="hidden" name="key" value="despensas2026">
+    <input type="hidden" name="key" value="abb46f223b7cec4e6e3781421d2d1cd5">
     <div class="filtros">
       <select name="estado" onchange="this.form.submit()">
         <option value="">Todos los estados</option>
@@ -1885,11 +1959,11 @@ app.get('/admin/usuarios', async function(req, res) {
         <div class="dato">💰 Último pago: <span>${ultimoPago ? '$' + ultimoPago.monto : 'Sin pagos'}</span></div>
       </div>
       ${pagosPend > 0 ? `<div class="pago-pendiente">⏳ ${pagosPend} pago(s) pendiente(s) de validar</div>` : ''}
-      <a class="btn-ver" href="/admin/usuario/${u.id}?key=despensas2026">Ver expediente completo →</a>
+      <a class="btn-ver" href="/admin/usuario/${u.id}?key=abb46f223b7cec4e6e3781421d2d1cd5">Ver expediente completo →</a>
     </div>`;
   }).join('')}
 
-  <a class="back" href="/admin/dashboard?key=despensas2026">← Volver al Dashboard</a>
+  <a class="back" href="/admin/dashboard?key=abb46f223b7cec4e6e3781421d2d1cd5">← Volver al Dashboard</a>
 </body>
 </html>`);
   } catch (err) {
@@ -1899,7 +1973,7 @@ app.get('/admin/usuarios', async function(req, res) {
 
 // Vista detallada de usuario individual
 app.get('/admin/usuario/:id', async function(req, res) {
-  if (req.query.key !== 'despensas2026') {
+  if (req.query.key !== 'abb46f223b7cec4e6e3781421d2d1cd5') {
     return res.status(403).send('Acceso denegado');
   }
   try {
@@ -1955,8 +2029,8 @@ app.get('/admin/usuario/:id', async function(req, res) {
 
   <div class="acciones">
     <a class="btn btn-cred" href="/credencial/${u.id}" target="_blank">🪪 Ver credencial</a>
-    ${u.activo ? `<a class="btn btn-desactivar" href="/admin/accion/${u.id}/desactivar?key=despensas2026">❌ Desactivar</a>` :
-                 `<a class="btn btn-activar" href="/admin/accion/${u.id}/activar?key=despensas2026">✅ Activar</a>`}
+    ${u.activo ? `<a class="btn btn-desactivar" href="/admin/accion/${u.id}/desactivar?key=abb46f223b7cec4e6e3781421d2d1cd5">❌ Desactivar</a>` :
+                 `<a class="btn btn-activar" href="/admin/accion/${u.id}/activar?key=abb46f223b7cec4e6e3781421d2d1cd5">✅ Activar</a>`}
   </div>
 
   <div class="seccion">
@@ -1966,6 +2040,7 @@ app.get('/admin/usuario/:id', async function(req, res) {
     <div class="fila"><span class="fila-label">⏳ Vigencia</span><span>${vigenciaStr}</span></div>
     <div class="fila"><span class="fila-label">👥 Referido por</span><span>${u.referidoPor || 'Directo'}</span></div>
     <div class="fila"><span class="fila-label">👥 Referidos</span><span>${u.referidos ? u.referidos.join(', ') || 'Ninguno' : 'Ninguno'}</span></div>
+    <div class="fila"><span class="fila-label">🪪 INE en expediente</span><span>${u.ineUrl ? '✅ Recibida (' + new Date(u.ineFecha).toLocaleDateString('es-MX') + ')' : '❌ No enviada'}</span></div>
   </div>
 
   <div class="seccion">
@@ -1991,7 +2066,7 @@ app.get('/admin/usuario/:id', async function(req, res) {
     `).join('') : '<div class="vacio">Sin consumos registrados</div>'}
   </div>
 
-  <a class="back" href="/admin/usuarios?key=despensas2026">← Volver a lista</a>
+  <a class="back" href="/admin/usuarios?key=abb46f223b7cec4e6e3781421d2d1cd5">← Volver a lista</a>
 </body>
 </html>`);
   } catch (err) {
@@ -2001,7 +2076,7 @@ app.get('/admin/usuario/:id', async function(req, res) {
 
 // Acciones rápidas sobre usuario
 app.get('/admin/accion/:id/:accion', async function(req, res) {
-  if (req.query.key !== 'despensas2026') {
+  if (req.query.key !== 'abb46f223b7cec4e6e3781421d2d1cd5') {
     return res.status(403).send('Acceso denegado');
   }
   try {
@@ -2017,14 +2092,14 @@ app.get('/admin/accion/:id/:accion', async function(req, res) {
       await enviarMensaje(u.telefono, '⚠️ Tu cuenta ha sido suspendida.\nContacta al administrador: https://wa.me/525576683884');
     }
 
-    res.redirect('/admin/usuario/' + u.id + '?key=despensas2026');
+    res.redirect('/admin/usuario/' + u.id + '?key=abb46f223b7cec4e6e3781421d2d1cd5');
   } catch (err) {
     res.status(500).send('Error: ' + err.message);
   }
 });
 
 app.get('/admin/predictivo', async function(req, res) {
-  if (req.query.key !== 'despensas2026') {
+  if (req.query.key !== 'abb46f223b7cec4e6e3781421d2d1cd5') {
     return res.status(403).send('Acceso denegado');
   }
   try {
@@ -2204,7 +2279,7 @@ app.get('/admin/predictivo', async function(req, res) {
     </div>
   </div>
 
-  <a class="back" href="/admin/dashboard?key=despensas2026">← Volver al Dashboard</a>
+  <a class="back" href="/admin/dashboard?key=abb46f223b7cec4e6e3781421d2d1cd5">← Volver al Dashboard</a>
 </body>
 </html>`);
   } catch (err) {
@@ -2213,7 +2288,7 @@ app.get('/admin/predictivo', async function(req, res) {
 });
 
 app.get('/admin/dashboard', async function(req, res) {
-  if (req.query.key !== 'despensas2026') {
+  if (req.query.key !== 'abb46f223b7cec4e6e3781421d2d1cd5') {
     return res.status(403).send('Acceso denegado');
   }
   try {
@@ -2362,12 +2437,12 @@ app.get('/admin/dashboard', async function(req, res) {
   </div>
 
   <div class="links">
-    <a class="btn" href="/admin/dashboard?key=despensas2026">📊 Dashboard</a>
-    <a class="btn" href="/admin/predictivo?key=despensas2026">📈 Predictivo</a>
-    <a class="btn" href="/admin/usuarios?key=despensas2026">👥 Usuarios</a>
-    <a class="btn" href="/admin/arbol?key=despensas2026">🌳 Árbol</a>
-    <a class="btn" href="/admin/lista?key=despensas2026">📋 Lista</a>
-    <a class="btn" href="/admin/respaldo?key=despensas2026">📦 Respaldo</a>
+    <a class="btn" href="/admin/dashboard?key=abb46f223b7cec4e6e3781421d2d1cd5">📊 Dashboard</a>
+    <a class="btn" href="/admin/predictivo?key=abb46f223b7cec4e6e3781421d2d1cd5">📈 Predictivo</a>
+    <a class="btn" href="/admin/usuarios?key=abb46f223b7cec4e6e3781421d2d1cd5">👥 Usuarios</a>
+    <a class="btn" href="/admin/arbol?key=abb46f223b7cec4e6e3781421d2d1cd5">🌳 Árbol</a>
+    <a class="btn" href="/admin/lista?key=abb46f223b7cec4e6e3781421d2d1cd5">📋 Lista</a>
+    <a class="btn" href="/admin/respaldo?key=abb46f223b7cec4e6e3781421d2d1cd5">📦 Respaldo</a>
     <a class="btn" href="/admin/login">🔐 Panel</a>
   </div>
 
@@ -2380,7 +2455,7 @@ app.get('/admin/dashboard', async function(req, res) {
 });
 
 app.get('/admin/arbol', async function(req, res) {
-  if (req.query.key !== 'despensas2026') {
+  if (req.query.key !== 'abb46f223b7cec4e6e3781421d2d1cd5') {
     return res.status(403).send('Acceso denegado');
   }
   try {
@@ -2679,11 +2754,11 @@ app.get('/admin/login', function(req, res) {
       <html><body style="font-family:sans-serif;max-width:600px;margin:50px auto;text-align:center">
         <h2>✅ Acceso autorizado</h2>
         <p>Bienvenido al panel de administración DespensaClub.</p>
-        <p><a href="/admin/dashboard?key=despensas2026">📊 Dashboard</a></p>
-        <p><a href="/admin/lista?key=despensas2026">📋 Ver lista de usuarios</a></p>
-        <p><a href="/admin/arbol?key=despensas2026">🌳 Ver árbol jerárquico</a></p>
-        <p><a href="/admin/respaldo?key=despensas2026">📦 Enviar respaldo</a></p>
-        <p><a href="/admin/resetbd?key=despensas2026">🗑️ Reset base de datos</a></p>
+        <p><a href="/admin/dashboard?key=abb46f223b7cec4e6e3781421d2d1cd5">📊 Dashboard</a></p>
+        <p><a href="/admin/lista?key=abb46f223b7cec4e6e3781421d2d1cd5">📋 Ver lista de usuarios</a></p>
+        <p><a href="/admin/arbol?key=abb46f223b7cec4e6e3781421d2d1cd5">🌳 Ver árbol jerárquico</a></p>
+        <p><a href="/admin/respaldo?key=abb46f223b7cec4e6e3781421d2d1cd5">📦 Enviar respaldo</a></p>
+        <p><a href="/admin/resetbd?key=abb46f223b7cec4e6e3781421d2d1cd5">🗑️ Reset base de datos</a></p>
       </body></html>
     `);
   }
@@ -2697,7 +2772,7 @@ app.get('/admin/login', function(req, res) {
 });
 
 app.get('/admin/resetbd', async function(req, res) {
-  if (req.query.key !== 'despensas2026') {
+  if (req.query.key !== 'abb46f223b7cec4e6e3781421d2d1cd5') {
     return res.status(403).send('Acceso denegado');
   }
   try {
@@ -2712,7 +2787,7 @@ app.get('/admin/resetbd', async function(req, res) {
 });
 
 app.get('/admin/respaldo', async function(req, res) {
-  if (req.query.key !== 'despensas2026') {
+  if (req.query.key !== 'abb46f223b7cec4e6e3781421d2d1cd5') {
     return res.status(403).send('Acceso denegado');
   }
   try {
@@ -2724,7 +2799,7 @@ app.get('/admin/respaldo', async function(req, res) {
 });
 
 app.get('/admin/lista', async function(req, res) {
-  if (req.query.key !== 'despensas2026') {
+  if (req.query.key !== 'abb46f223b7cec4e6e3781421d2d1cd5') {
     return res.status(403).send('Acceso denegado');
   }
   try {
