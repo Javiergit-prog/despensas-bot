@@ -948,7 +948,7 @@ async function procesarMensaje(telefono, mensaje) {
       await new Promise(r => setTimeout(r, 1500));
 
       await enviarMensaje(telefono,
-        '📋 *SIGUIENTE PASO IMPORTANTE*\n\nPresentate con el administrador para recoger tu *credencial fisica* con tu codigo de usuario.\n\nSin ella no podras recoger tu despensa mensual. 🎁'
+        '📋 *SIGUIENTE PASO IMPORTANTE*\n\nPrestate con el administrador para recoger tu *credencial fisica* con tu codigo de usuario.\n\nSin ella no podras recoger tu despensa mensual. 🎁'
       );
 
       // Notificar al admin
@@ -1342,6 +1342,70 @@ async function procesarMensaje(telefono, mensaje) {
         await enviarMensaje(telefono, '📋 Generando lista mensual...');
         await generarListaMensual();
         await enviarMensaje(telefono, '✅ Lista enviada al 5585567250.');
+        return;
+      }
+
+      if (texto.startsWith('ELIMINAR ') && !texto.startsWith('ELIMINAR CONFIRMAR')) {
+        const idEliminar = texto.replace('ELIMINAR ', '').trim().toUpperCase();
+        const userEliminar = await Usuario.findOne({ id: idEliminar });
+        if (!userEliminar) { await enviarMensaje(telefono, '❌ No encontré el usuario ' + idEliminar); return; }
+        if (USUARIOS_EXENTOS.includes(idEliminar)) {
+          await enviarMensaje(telefono, '⛔ ' + idEliminar + ' es una cuenta exenta y no se puede eliminar.');
+          return;
+        }
+        await enviarMensaje(telefono,
+          '⚠️ *CONFIRMAR ELIMINACIÓN*\n\n' +
+          '👤 ' + userEliminar.nombre + ' (' + idEliminar + ')\n' +
+          '👥 Referidos: ' + (userEliminar.referidos ? userEliminar.referidos.length : 0) + '\n' +
+          '💰 Pagos registrados: ' + (userEliminar.pagos ? userEliminar.pagos.length : 0) + '\n\n' +
+          '🚨 Esta acción es *PERMANENTE* y borra todo su historial.\n\n' +
+          'Para confirmar escribe:\n*ELIMINAR CONFIRMAR ' + idEliminar + '*'
+        );
+        return;
+      }
+
+      if (texto.startsWith('ELIMINAR CONFIRMAR ')) {
+        const idEliminar = texto.replace('ELIMINAR CONFIRMAR ', '').trim().toUpperCase();
+        const userEliminar = await Usuario.findOne({ id: idEliminar });
+        if (!userEliminar) { await enviarMensaje(telefono, '❌ No encontré el usuario ' + idEliminar); return; }
+        if (USUARIOS_EXENTOS.includes(idEliminar)) {
+          await enviarMensaje(telefono, '⛔ ' + idEliminar + ' es una cuenta exenta y no se puede eliminar.');
+          return;
+        }
+
+        // Liberar su lugar quitándolo de los referidos de su patrocinador
+        if (userEliminar.referidoPor) {
+          await Usuario.updateOne(
+            { id: userEliminar.referidoPor },
+            { $pull: { referidos: idEliminar } }
+          );
+        }
+
+        // Reasignar sus propios referidos directos al patrocinador de este usuario (evita huérfanos)
+        if (userEliminar.referidos && userEliminar.referidos.length > 0) {
+          for (const refId of userEliminar.referidos) {
+            await Usuario.updateOne(
+              { id: refId },
+              { referidoPor: userEliminar.referidoPor || null, nivel: Math.max((userEliminar.nivel || 0), 0) }
+            );
+            if (userEliminar.referidoPor) {
+              await Usuario.updateOne(
+                { id: userEliminar.referidoPor },
+                { $addToSet: { referidos: refId } }
+              );
+            }
+          }
+        }
+
+        await Usuario.deleteOne({ id: idEliminar });
+
+        await enviarMensaje(telefono,
+          '✅ *USUARIO ELIMINADO*\n\n' +
+          idEliminar + ' (' + userEliminar.nombre + ') fue eliminado permanentemente.\n\n' +
+          (userEliminar.referidos && userEliminar.referidos.length > 0
+            ? '👥 Sus ' + userEliminar.referidos.length + ' referido(s) fueron reasignados a su antiguo patrocinador.'
+            : '')
+        );
         return;
       }
 
