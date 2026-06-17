@@ -1102,6 +1102,83 @@ async function procesarMensaje(telefono, mensaje) {
         return;
       }
 
+      if (texto.startsWith('REASIGNAR ')) {
+        const partes = texto.replace('REASIGNAR ', '').trim().split(' ');
+        if (partes.length !== 2) {
+          await enviarMensaje(telefono, '❌ Formato incorrecto.\n\nUsa: *REASIGNAR DESP-000XXX DESP-000YYY*\n(usuario a mover, nuevo patrocinador)');
+          return;
+        }
+        const idMover = partes[0].toUpperCase();
+        const idNuevoPatrocinador = partes[1].toUpperCase();
+
+        if (idMover === idNuevoPatrocinador) {
+          await enviarMensaje(telefono, '❌ No puedes asignar un usuario como su propio patrocinador.');
+          return;
+        }
+
+        const usuarioMover = await Usuario.findOne({ id: idMover });
+        if (!usuarioMover) { await enviarMensaje(telefono, '❌ No encontré el usuario ' + idMover); return; }
+
+        const nuevoPatrocinador = await Usuario.findOne({ id: idNuevoPatrocinador });
+        if (!nuevoPatrocinador) { await enviarMensaje(telefono, '❌ No encontré el usuario ' + idNuevoPatrocinador); return; }
+
+        // Evitar mover a alguien debajo de uno de sus propios referidos (ciclo)
+        let cursor = nuevoPatrocinador;
+        while (cursor) {
+          if (cursor.id === idMover) {
+            await enviarMensaje(telefono, '❌ No puedes mover a un usuario debajo de su propio referido (crearía un ciclo).');
+            return;
+          }
+          cursor = cursor.referidoPor ? await Usuario.findOne({ id: cursor.referidoPor }) : null;
+        }
+
+        // Verificar espacio disponible en el nuevo patrocinador
+        const refCount = nuevoPatrocinador.referidos ? nuevoPatrocinador.referidos.length : 0;
+        if (refCount >= 4) {
+          await enviarMensaje(telefono, '❌ ' + idNuevoPatrocinador + ' ya tiene sus 4 lugares ocupados.');
+          return;
+        }
+
+        const patrocinadorAnteriorId = usuarioMover.referidoPor;
+
+        // Quitar de la lista de referidos del patrocinador anterior
+        if (patrocinadorAnteriorId) {
+          await Usuario.updateOne(
+            { id: patrocinadorAnteriorId },
+            { $pull: { referidos: idMover } }
+          );
+        }
+
+        // Agregar a la lista de referidos del nuevo patrocinador
+        await Usuario.updateOne(
+          { id: idNuevoPatrocinador },
+          { $push: { referidos: idMover } }
+        );
+
+        // Actualizar al usuario movido: nuevo patrocinador y nuevo nivel
+        const nuevoNivel = (nuevoPatrocinador.nivel || 0) + 1;
+        await Usuario.updateOne(
+          { id: idMover },
+          { referidoPor: idNuevoPatrocinador, nivel: nuevoNivel }
+        );
+
+        await enviarMensaje(telefono,
+          '✅ *REASIGNACIÓN COMPLETADA*\n\n' +
+          '👤 ' + usuarioMover.nombre + ' (' + idMover + ')\n' +
+          '📤 Antes: ' + (patrocinadorAnteriorId || 'Sin patrocinador') + '\n' +
+          '📥 Ahora: ' + idNuevoPatrocinador + '\n' +
+          '🎨 Nuevo nivel: ' + nuevoNivel
+        );
+
+        await enviarMensaje(usuarioMover.telefono,
+          '📋 *ACTUALIZACIÓN DE RED*\n\n' +
+          'Hola *' + usuarioMover.nombre + '*\n\n' +
+          'Tu posición en la red de DespensaClub fue actualizada por el administrador.\n\n' +
+          'Si tienes dudas contacta al administrador.'
+        );
+        return;
+      }
+
       if (texto === 'VERIFICAR') {
         await enviarMensaje(telefono, '❄️ Verificando congelamientos...');
         await verificarCongelamiento();
