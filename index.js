@@ -49,7 +49,9 @@ const usuarioSchema = new mongoose.Schema({
     pagada: { type: Boolean, default: false }
   }],
   activo: { type: Boolean, default: true },
-  congelado: { type: Boolean, default: false }
+  congelado: { type: Boolean, default: false },
+  archivado: { type: Boolean, default: false },
+  fechaArchivado: Date
 });
 
 const Usuario = mongoose.model('Usuario', usuarioSchema);
@@ -118,7 +120,7 @@ function generarID(contador) {
 // Busca un lugar disponible (menos de 4 referidos) balanceado por niveles:
 // recorre nivel por nivel desde la raíz hasta encontrar el primer hueco.
 async function buscarPosicionDisponible() {
-  const todos = await Usuario.find({}, 'id nivel referidos').lean();
+  const todos = await Usuario.find({ archivado: { $ne: true } }, 'id nivel referidos').lean();
   if (todos.length === 0) return null; // No hay nadie todavía
 
   const nivelMax = Math.max(...todos.map(u => u.nivel || 0));
@@ -452,6 +454,112 @@ function iniciarCongelamiento() {
   setTimeout(function() {
     verificarCongelamiento();
     setInterval(verificarCongelamiento, 24 * 60 * 60 * 1000);
+  }, tiempoEspera);
+}
+
+// ============================================================
+// ARCHIVADO AUTOMÁTICO POR INACTIVIDAD (60 días sin consumo)
+// ============================================================
+function obtenerUltimaFechaActividad(u) {
+  const fechas = [];
+  if (u.consumos && u.consumos.length > 0) {
+    fechas.push(...u.consumos.map(c => new Date(c.fecha)));
+  }
+  if (u.pagos && u.pagos.length > 0) {
+    fechas.push(...u.pagos.filter(p => p.estado === 'confirmado').map(p => new Date(p.fecha)));
+  }
+  fechas.push(new Date(u.fechaRegistro));
+  return new Date(Math.max(...fechas.map(f => f.getTime())));
+}
+
+async function verificarArchivado() {
+  try {
+    console.log('Verificando archivado por inactividad...');
+    const hoy = new Date();
+    const usuarios = await Usuario.find({ archivado: { $ne: true } });
+
+    for (const u of usuarios) {
+      if (USUARIOS_EXENTOS.includes(u.id)) continue;
+
+      const ultimaActividad = obtenerUltimaFechaActividad(u);
+      const diasInactivo = Math.floor((hoy - ultimaActividad) / (1000 * 60 * 60 * 24));
+
+      // Aviso 7 días antes de archivar (día 53 de inactividad)
+      if (diasInactivo === 53) {
+        await enviarMensaje(u.telefono,
+          '⚠️ *AVISO DE INACTIVIDAD*\n\n' +
+          'Hola *' + u.nombre + '* 👋\n\n' +
+          'No hemos detectado consumo de tu parte en los últimos *53 días*.\n\n' +
+          '📅 Si no hay actividad en *7 días más*, tu cuenta será archivada y tu lugar en la red quedará disponible para otro usuario.\n\n' +
+          'Si deseas continuar, escribe *MENU* → opción *4* para registrar tu pago.\n\n' +
+          'Si tienes dudas contacta al administrador:\n' +
+          'https://wa.me/525576683884'
+        );
+        await new Promise(r => setTimeout(r, 1000));
+        continue;
+      }
+
+      // Archivar a los 60 días de inactividad
+      if (diasInactivo >= 60) {
+        const patrocinadorId = u.referidoPor;
+
+        await Usuario.updateOne(
+          { id: u.id },
+          {
+            archivado: true,
+            activo: false,
+            fechaArchivado: hoy
+          }
+        );
+
+        // Quitar de la lista de referidos del patrocinador para liberar su lugar
+        if (patrocinadorId) {
+          await Usuario.updateOne(
+            { id: patrocinadorId },
+            { $pull: { referidos: u.id } }
+          );
+        }
+
+        await enviarMensaje(u.telefono,
+          '📦 *CUENTA ARCHIVADA*\n\n' +
+          'Hola *' + u.nombre + '*\n\n' +
+          'Tu cuenta fue archivada por inactividad de más de 60 días.\n\n' +
+          'Tu historial se conserva. Si deseas reactivarla, contacta al administrador:\n' +
+          'https://wa.me/525576683884?text=Hola%2C%20quiero%20reactivar%20mi%20cuenta%20' + u.id
+        );
+
+        await enviarMensaje('5215585567250',
+          '📦 *USUARIO ARCHIVADO POR INACTIVIDAD*\n\n' +
+          '👤 ' + u.nombre + ' (' + u.id + ')\n' +
+          '📅 Última actividad: ' + ultimaActividad.toLocaleDateString('es-MX') + '\n' +
+          '⏳ Días inactivo: ' + diasInactivo + '\n\n' +
+          'Su lugar en la red quedó disponible.\n' +
+          'Para reactivar usa: *REACTIVAR ' + u.id + '*'
+        );
+
+        console.log('📦 Usuario archivado: ' + u.id + ' — ' + u.nombre);
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+    console.log('✅ Verificación de archivado completada');
+  } catch (err) {
+    console.error('❌ Error en archivado:', err.message);
+  }
+}
+
+// Ejecutar verificación de archivado diario a las 8:30 AM hora Mexico (2:30 PM UTC)
+function iniciarArchivado() {
+  var ahora = new Date();
+  var proximaEjecucion = new Date();
+  proximaEjecucion.setUTCHours(14, 30, 0, 0);
+  if (proximaEjecucion <= ahora) {
+    proximaEjecucion.setDate(proximaEjecucion.getDate() + 1);
+  }
+  var tiempoEspera = proximaEjecucion - ahora;
+  console.log('Próximo archivado en ' + Math.round(tiempoEspera/1000/60) + ' minutos');
+  setTimeout(function() {
+    verificarArchivado();
+    setInterval(verificarArchivado, 24 * 60 * 60 * 1000);
   }, tiempoEspera);
 }
 
@@ -1183,6 +1291,40 @@ async function procesarMensaje(telefono, mensaje) {
         await enviarMensaje(telefono, '❄️ Verificando congelamientos...');
         await verificarCongelamiento();
         await enviarMensaje(telefono, '✅ Verificación completada.');
+        return;
+      }
+
+      if (texto === 'VERIFICAR ARCHIVADO') {
+        await enviarMensaje(telefono, '📦 Verificando inactividad...');
+        await verificarArchivado();
+        await enviarMensaje(telefono, '✅ Verificación de archivado completada.');
+        return;
+      }
+
+      if (texto.startsWith('REACTIVAR ')) {
+        const idU = texto.replace('REACTIVAR ', '').trim().toUpperCase();
+        const userU = await Usuario.findOne({ id: idU });
+        if (!userU) { await enviarMensaje(telefono, '❌ No encontré el usuario ' + idU); return; }
+        if (!userU.archivado) { await enviarMensaje(telefono, 'ℹ️ ' + idU + ' no está archivado.'); return; }
+
+        await Usuario.updateOne(
+          { id: idU },
+          { archivado: false, activo: true, fechaArchivado: null }
+        );
+
+        // Reasignar su lugar si el patrocinador original sigue activo y con espacio
+        if (userU.referidoPor) {
+          const patrocinador = await Usuario.findOne({ id: userU.referidoPor });
+          if (patrocinador && !patrocinador.archivado && (patrocinador.referidos ? patrocinador.referidos.length : 0) < 4) {
+            await Usuario.updateOne({ id: patrocinador.id }, { $addToSet: { referidos: idU } });
+          }
+        }
+
+        await enviarMensaje(telefono, '✅ ' + userU.nombre + ' (' + idU + ') reactivado correctamente.');
+        await enviarMensaje(userU.telefono,
+          '🎉 *TU CUENTA HA SIDO REACTIVADA*\n\n' +
+          'Hola *' + userU.nombre + '*, tu cuenta en DespensaClub está activa nuevamente. ¡Bienvenido de vuelta! 🛒'
+        );
         return;
       }
 
@@ -2641,4 +2783,5 @@ app.listen(PORT, '0.0.0.0', function() {
   iniciarRespaldoDiario();
   iniciarRecordatorios();
   iniciarCongelamiento();
+  iniciarArchivado();
 });
