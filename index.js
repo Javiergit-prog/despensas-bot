@@ -101,6 +101,9 @@ const CONFIG_PRECIOS = {
   comisionReferido: 20
 };
 
+// QR de cobro CoDi (Banamex) — monto abierto, sin costo ni comisiones
+const QR_CODI_URL = 'https://github.com/Javiergit-prog/despensas-bot/blob/main/QR%20Banamex.jpeg?raw=true';
+
 const COLORES_NIVEL = {
   0: 'VIOLETA', 1: 'DORADO', 2: 'AZUL',
   3: 'NARANJA', 4: 'ROSA', 5: 'VERDE',
@@ -1111,12 +1114,21 @@ async function procesarMensaje(telefono, mensaje) {
       const concepto = texto === '1' ? 'Membresía anual' : 'Despensa mensual';
       const monto = texto === '1' ? CONFIG_PRECIOS.membresia : CONFIG_PRECIOS.despensa;
       sesiones[telefono] = { paso: 'esperar_comprobante', datos: { concepto, monto } };
+
+      await enviarImagen(telefono, QR_CODI_URL,
+        '💳 *PAGA CON CoDi®*\n\n' +
+        'Escanea este código desde tu app bancaria (cualquier banco).\n\n' +
+        'Concepto: *' + concepto + '*\n' +
+        '💵 Monto a pagar: *$' + monto + ' pesos*\n\n' +
+        '✅ Sin comisiones, pago directo e instantáneo.'
+      );
+
+      await new Promise(r => setTimeout(r, 1500));
+
       await enviarMensaje(telefono,
         '📸 *SUBE TU COMPROBANTE*\n\n' +
-        'Concepto: *' + concepto + '*\n' +
-        'Monto: *$' + monto + ' pesos*\n\n' +
-        'Ahora envía una *foto o captura* de tu comprobante de pago.\n\n' +
-        '⚠️ Asegúrate que se vea claramente el monto y la referencia.'
+        'Una vez realizado el pago, envía una *foto o captura* de tu comprobante.\n\n' +
+        '⚠️ Asegúrate que se vea claramente el monto y la fecha.'
       );
       return;
     }
