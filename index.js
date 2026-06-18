@@ -2835,6 +2835,31 @@ app.get('/portal', async function(req, res) {
       ? await Usuario.find({ id: { $in: u.referidos } }, 'id nombre activo').lean()
       : [];
 
+    // Construir mi rama descendente completa (solo mis propios descendientes, por privacidad)
+    const todosLosUsuarios = await Usuario.find({}, 'id nombre nivel referidoPor referidos activo').lean();
+
+    function buildNodoMini(usuario, todos) {
+      const c = COLORES_HEX[usuario.nivel || 0] || COLORES_HEX[0];
+      const hijos = todos.filter(x => x.referidoPor === usuario.id);
+      const hijosHTML = hijos.map(h => buildNodoMini(h, todos)).join('');
+      return `
+        <div class="mini-nodo-wrap">
+          <div class="mini-nodo" style="background:${c}">
+            <div class="mini-nodo-id">${usuario.id}</div>
+            <div class="mini-nodo-nombre">${usuario.nombre}</div>
+            <div class="mini-nodo-estado">${usuario.activo ? '✅' : '❌'}</div>
+          </div>
+          ${hijosHTML ? `<div class="mini-hijos">${hijosHTML}</div>` : ''}
+        </div>`;
+    }
+
+    const miArbolHTML = referidosInfo.length > 0
+      ? referidosInfo.map(r => {
+          const rCompleto = todosLosUsuarios.find(x => x.id === r.id);
+          return buildNodoMini(rCompleto, todosLosUsuarios);
+        }).join('')
+      : '<div class="vacio">Aún no tienes referidos. ¡Comparte tu código e invita a tu primera persona!</div>';
+
     res.send(`<!DOCTYPE html>
 <html>
 <head>
@@ -2862,6 +2887,15 @@ app.get('/portal', async function(req, res) {
     .btn-cred { display: block; text-align: center; padding: 12px; background: ${color}; color: #fff; border-radius: 10px; text-decoration: none; font-weight: bold; font-size: 14px; margin-bottom: 16px; }
     .ref-activo { color: #25D366; }
     .ref-inactivo { color: #f44336; }
+    .seccion-arbol { background: #16213e; border-radius: 12px; padding: 14px; margin-bottom: 12px; overflow-x: auto; }
+    .seccion-arbol h3 { font-size: 13px; color: #25D366; margin-bottom: 10px; }
+    .arbol-mini { display: flex; gap: 10px; padding-bottom: 8px; min-width: max-content; }
+    .mini-nodo-wrap { display: inline-flex; flex-direction: column; align-items: center; }
+    .mini-nodo { border-radius: 10px; padding: 6px 10px; min-width: 90px; max-width: 110px; text-align: center; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.4); margin-bottom: 6px; }
+    .mini-nodo-id { font-size: 9px; opacity: 0.85; }
+    .mini-nodo-nombre { font-size: 11px; font-weight: bold; word-break: break-word; }
+    .mini-nodo-estado { font-size: 10px; margin-top: 2px; }
+    .mini-hijos { display: flex; gap: 8px; border-top: 2px solid #0f3460; padding-top: 6px; margin-top: 0; }
   </style>
 </head>
 <body>
@@ -2889,6 +2923,13 @@ app.get('/portal', async function(req, res) {
         ${r.nombre} — ${r.id}
       </div>
     `).join('') : '<div class="vacio">Aún no tienes referidos. ¡Invita a tus familiares y amigos!</div>'}
+  </div>
+
+  <div class="seccion-arbol">
+    <h3>🌳 Mi rama (mi red descendente)</h3>
+    <div class="arbol-mini">
+      ${miArbolHTML}
+    </div>
   </div>
 
   <div class="seccion">
