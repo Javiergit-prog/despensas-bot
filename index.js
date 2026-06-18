@@ -125,6 +125,16 @@ function generarID(contador) {
 // ============================================================
 // Busca un lugar disponible (menos de 4 referidos) balanceado por niveles:
 // recorre nivel por nivel desde la raíz hasta encontrar el primer hueco.
+// ============================================================
+// LÍMITE DE REFERIDOS — caso especial para el usuario raíz
+// DESP-000110 (la raíz del árbol) solo puede tener 1 referido directo,
+// ya que no tiene patrocinador propio que reciba el "excedente".
+// Todos los demás usuarios mantienen el límite normal de 4.
+// ============================================================
+function limiteReferidos(idUsuario) {
+  return idUsuario === 'DESP-000110' ? 1 : 4;
+}
+
 async function buscarPosicionDisponible() {
   const todos = await Usuario.find({ archivado: { $ne: true } }, 'id nivel referidos').lean();
   if (todos.length === 0) return null; // No hay nadie todavía
@@ -133,7 +143,7 @@ async function buscarPosicionDisponible() {
 
   for (let nv = 0; nv <= nivelMax; nv++) {
     const candidatos = todos
-      .filter(u => (u.nivel || 0) === nv && (u.referidos ? u.referidos.length : 0) < 4)
+      .filter(u => (u.nivel || 0) === nv && (u.referidos ? u.referidos.length : 0) < limiteReferidos(u.id))
       .sort((a, b) => (a.referidos ? a.referidos.length : 0) - (b.referidos ? b.referidos.length : 0));
     if (candidatos.length > 0) return candidatos[0].id;
   }
@@ -728,13 +738,108 @@ function menuPrincipal() {
     '2️⃣ Ver mi informacion y mi ID\n' +
     '3️⃣ Invitar a mis referidos\n' +
     '4️⃣ Registrar mi pago\n' +
-    '5️⃣ Reportar un problema\n\n' +
+    '5️⃣ Reportar un problema\n' +
+    '6️⃣ ¿Qué es DespensaClub? / Quiero saber más\n\n' +
     '📲 Responde con el *numero* de tu opcion.';
 }
 
 // ============================================================
 // LOGICA DEL BOT
 // ============================================================
+// ============================================================
+// CONFIRMAR PAGO PENDIENTE (reutilizable: comando WhatsApp y escáner QR en sucursal)
+// Retorna { ok: true, userU, pago, estabaCongelado, avisoComision } o { ok: false, motivo }
+// ============================================================
+async function confirmarPagoPendiente(idU) {
+  const userU = await Usuario.findOne({ id: idU });
+  if (!userU) return { ok: false, motivo: 'No encontré el usuario ' + idU };
+
+  const pagoIdx = userU.pagos.findLastIndex(function(p) { return p.estado === 'pendiente'; });
+  if (pagoIdx === -1) return { ok: false, motivo: 'No hay pagos pendientes para ' + idU };
+
+  userU.pagos[pagoIdx].estado = 'confirmado';
+
+  const estabaCongelado = userU.congelado || !userU.activo;
+  userU.congelado = false;
+  userU.activo = true;
+
+  if (userU.pagos[pagoIdx].concepto === 'Membresía anual') {
+    const nuevaVigencia = new Date();
+    nuevaVigencia.setFullYear(nuevaVigencia.getFullYear() + 1);
+    userU.vigencia = nuevaVigencia;
+  }
+
+  await userU.save();
+  const pago = userU.pagos[pagoIdx];
+
+  let avisoComision = '';
+  if (pago.concepto === 'Despensa mensual') {
+    const ahora = new Date();
+    const consumosEsteMes = (userU.consumos || []).filter(c => {
+      const fc = new Date(c.fecha);
+      return c.descripcion === 'Despensa mensual' &&
+             fc.getMonth() === ahora.getMonth() &&
+             fc.getFullYear() === ahora.getFullYear();
+    });
+    if (consumosEsteMes.length >= 1) {
+      await enviarMensaje('5215585567250',
+        '🚨 *ACTIVIDAD INUSUAL*: ' + userU.nombre + ' (' + userU.id + ') ya registró ' + consumosEsteMes.length + ' consumo(s) de despensa este mes. Verifica que no sea un error o doble cobro.'
+      );
+    }
+
+    await Usuario.updateOne(
+      { id: userU.id },
+      { $push: { consumos: { fecha: new Date(), descripcion: 'Despensa mensual' } } }
+    );
+
+    if (userU.referidoPor) {
+      const patrocinador = await Usuario.findOne({ id: userU.referidoPor });
+      if (patrocinador) {
+        await Usuario.updateOne(
+          { id: patrocinador.id },
+          { $push: { comisiones: {
+            monto: CONFIG_PRECIOS.comisionReferido,
+            deUsuario: userU.id,
+            deNombre: userU.nombre,
+            fecha: new Date(),
+            pagada: false
+          }}}
+        );
+        await enviarMensaje(patrocinador.telefono,
+          '💰 *COMISIÓN GENERADA*\n\n' +
+          'Tu referido *' + userU.nombre + '* (' + userU.id + ') confirmó su pago de despensa.\n\n' +
+          '🎁 Comisión: *$' + CONFIG_PRECIOS.comisionReferido + ' pesos*\n\n' +
+          'Escribe *MIS COMISIONES* para ver tu total acumulado.'
+        );
+        avisoComision = 'Comisión de $' + CONFIG_PRECIOS.comisionReferido + ' generada para ' + patrocinador.id;
+      }
+    }
+  }
+
+  await enviarMensaje(userU.telefono,
+    '✅ *TU PAGO FUE CONFIRMADO*\n\n' +
+    'Hola *' + userU.nombre + '*\n\n' +
+    '💵 Concepto: ' + pago.concepto + '\n' +
+    '💵 Monto: $' + pago.monto + ' pesos\n' +
+    '📅 Fecha: ' + new Date().toLocaleDateString('es-MX') +
+    (pago.concepto === 'Membresía anual' ? '\n⏳ Vigencia: ' + new Date(userU.vigencia).toLocaleDateString('es-MX') : '') +
+    (estabaCongelado ? '\n\n🎉 *Tu cuenta ha sido reactivada.*\nYa puedes disfrutar de todos los beneficios.' : '') +
+    '\n\n¡Gracias por tu pago! 🛒'
+  );
+
+  if (estabaCongelado && userU.referidoPor) {
+    const patrocinador = await Usuario.findOne({ id: userU.referidoPor });
+    if (patrocinador) {
+      await enviarMensaje(patrocinador.telefono,
+        '✅ *Tu referido se reactivó*\n\n' +
+        '*' + userU.nombre + '* (' + userU.id + ') regularizó su pago y su cuenta está activa nuevamente.'
+      );
+    }
+  }
+
+  return { ok: true, userU, pago, estabaCongelado, avisoComision };
+}
+
 async function procesarMensaje(telefono, mensaje) {
   try {
     const texto = mensaje.trim();
@@ -881,12 +986,12 @@ async function procesarMensaje(telefono, mensaje) {
           await enviarMensaje(telefono, '❌ No encontre ese codigo. Verifica e intenta de nuevo.\n\nO escribe *NO* si no tienes codigo.');
           return;
         }
-        // Verificar si el referidor ya tiene 4 referidos
+        // Verificar si el referidor ya alcanzó su límite de referidos
         const refCount = referidor.referidos ? referidor.referidos.length : 0;
-        if (refCount >= 4) {
+        if (refCount >= limiteReferidos(referidor.id)) {
           await enviarMensaje(telefono,
             '⛔ *CODIGO NO DISPONIBLE*\n\n' +
-            'El usuario con ese codigo ya completo sus 4 lugares disponibles.\n\n' +
+            'El usuario con ese codigo ya completo sus lugares disponibles.\n\n' +
             'Contacta al administrador para mas informacion:\n' +
             'https://wa.me/525576683884?text=Hola%20necesito%20ayuda%20con%20un%20registro'
           );
@@ -1165,12 +1270,13 @@ async function procesarMensaje(telefono, mensaje) {
         return;
       }
       const u = usuarioExistente;
-      const restantes = 4 - u.referidos.length;
+      const miLimite = limiteReferidos(u.id);
+      const restantes = miLimite - u.referidos.length;
 
-      // Bloquear si ya tiene 4 referidos
-      if (u.referidos.length >= 4) {
+      // Bloquear si ya alcanzó su límite de referidos
+      if (u.referidos.length >= miLimite) {
         await enviarMensaje(telefono,
-          '⛔ *YA COMPLETASTE TUS 4 REFERIDOS*\n\n' +
+          '⛔ *YA COMPLETASTE TUS ' + miLimite + ' REFERIDO' + (miLimite > 1 ? 'S' : '') + '*\n\n' +
           'Tu estructura esta completa con:\n' +
           u.referidos.map(function(r, i) { return (i+1) + '. ' + r; }).join('\n') + '\n\n' +
           'Si deseas hacer algun cambio comunicate directamente con el administrador.\n\n' +
@@ -1180,25 +1286,21 @@ async function procesarMensaje(telefono, mensaje) {
       }
       await enviarMensaje(telefono,
         '👥 *INVITAR REFERIDOS*\n\n' +
-        'Tu codigo para invitar es: *' + u.id + '*\n' +
-        'Tienes *' + u.referidos.length + '/4* referidos. Te faltan *' + restantes + '*.\n\n' +
-        'Copia y comparte este mensaje:\n\n' +
-        '——————————————\n' +
+        'Tu codigo para invitar es:\n*' + u.id + '*\n' +
+        'Tienes *' + u.referidos.length + '/' + miLimite + '* referidos. Te faltan *' + restantes + '*.\n' +
+        '_Comparte este mensaje_\n\n' +
         '🛒 *DESPENSACLUB*\n' +
         '_Comunidad de Consumo Inteligente_\n\n' +
-        'Hola! Te invito a formar parte de nuestra comunidad de despensas mensuales.\n\n' +
-        '*¿Que es DespensaClub?*\n' +
-        'Una comunidad donde puedes adquirir productos de despensa mensualmente a un precio accesible y justo.\n\n' +
-        '*¿Como funciona?*\n' +
-        '1️⃣ Paga tu credencial y membresia — pago unico anual de solo *$50 pesos*\n' +
-        '2️⃣ Cada mes recoge tu despensa familiar por *$250 pesos*\n' +
-        '3️⃣ Al invitar a familiares, amigos y conocidos que tambien consuman, puedes acumular *bonos y descuentos* en tu membresia\n\n' +
-        '*¿Te gustaria registrarte y hacer tus compras de manera inteligente?*\n\n' +
-        '👇 Toca el enlace — el mensaje se escribe automaticamente, solo sigue los sencillos pasos:\n' +
+        'Convierte tus compras de despensa en ahorro.🤑 $\n\n' +
+        '✔️ Membresía anual: $50 pesos\n' +
+        '✔️ Despensa mensual: $250 pesos\n' +
+        '✔️ Beneficios por invitar a otros consumidores\n\n' +
+        '➡️📲 Regístrate aquí:\n' +
         'https://wa.me/525576683884?text=HOLA\n\n' +
-        '_Cuando te pidan codigo de referido escribe:_\n' +
-        '*' + u.id + '*\n' +
-        '——————————————'
+        '👇👇⚠️*IMPORTANTE NO LO OLVIDES*👇👇\n\n' +
+        '🔑 *CÓDIGO DE INVITACIÓN*\n' +
+        '✨ *' + u.id + '* ✨\n\n' +
+        'Escríbelo durante tu registro para que tu invitación quede registrada correctamente.'
       );
       return;
     }
@@ -1227,6 +1329,64 @@ async function procesarMensaje(telefono, mensaje) {
       }
       const concepto = texto === '1' ? 'Membresía anual' : 'Despensa mensual';
       const monto = texto === '1' ? CONFIG_PRECIOS.membresia : CONFIG_PRECIOS.despensa;
+      sesiones[telefono] = { paso: 'pedir_metodo_pago', datos: { concepto, monto } };
+
+      await enviarMensaje(telefono,
+        '💳 *¿CÓMO VAS A PAGAR?*\n\n' +
+        'Concepto: *' + concepto + '*\n' +
+        'Monto: *$' + monto + ' pesos*\n\n' +
+        '1️⃣ CoDi (transferencia desde tu banco)\n' +
+        '2️⃣ Efectivo al momento de recoger mi despensa\n\n' +
+        'Responde con *1* o *2*'
+      );
+      return;
+    }
+
+    if (sesion.paso === 'pedir_metodo_pago') {
+      if (texto !== '1' && texto !== '2') {
+        await enviarMensaje(telefono, '❌ Responde solo con *1* o *2*');
+        return;
+      }
+      const { concepto, monto } = sesion.datos;
+
+      // Pago en efectivo: se registra como pendiente, se confirma al recoger en sucursal
+      if (texto === '2') {
+        const fecha = new Date();
+        await Usuario.updateOne(
+          { telefono: telefono },
+          { $push: { pagos: {
+            concepto: concepto,
+            monto: monto,
+            fecha: fecha,
+            estado: 'pendiente',
+            metodoPago: 'efectivo',
+            comprobante: 'pago_en_efectivo_pendiente'
+          }}}
+        );
+        delete sesiones[telefono];
+
+        await enviarMensaje(telefono,
+          '✅ *PAGO EN EFECTIVO REGISTRADO*\n\n' +
+          'Concepto: *' + concepto + '*\n' +
+          'Monto: *$' + monto + ' pesos*\n' +
+          'Estado: ⏳ Pendiente — paga en efectivo al recoger\n\n' +
+          'Tu credencial digital será escaneada en sucursal para confirmar tu pago automáticamente.'
+        );
+
+        await enviarMensaje('5215585567250',
+          '💵 *PAGO EN EFECTIVO PROGRAMADO*\n\n' +
+          '👤 ' + usuarioExistente.nombre + '\n' +
+          '🪪 ' + usuarioExistente.id + '\n' +
+          '📱 +' + telLimpio + '\n' +
+          '💵 Concepto: ' + concepto + '\n' +
+          '💵 Monto: $' + monto + ' pesos (EFECTIVO)\n' +
+          '📅 ' + fecha.toLocaleDateString('es-MX') + '\n\n' +
+          'Se confirmará automáticamente al escanear su credencial en sucursal, o manualmente con:\n*CONFIRMAR ' + usuarioExistente.id + '*'
+        );
+        return;
+      }
+
+      // Pago con CoDi: continúa el flujo original con QR
       sesiones[telefono] = { paso: 'esperar_comprobante', datos: { concepto, monto } };
 
       await enviarImagen(telefono, QR_CODI_URL,
@@ -1305,6 +1465,27 @@ async function procesarMensaje(telefono, mensaje) {
     if (sesion.paso === 'menu' && texto === '5') {
       sesiones[telefono] = { paso: 'pedir_reporte', datos: {} };
       await enviarMensaje(telefono, '📝 *REPORTAR PROBLEMA*\n\nDescribe tu problema:');
+      return;
+    }
+
+    // ── OPCION 6: QUE ES DESPENSACLUB
+    if (sesion.paso === 'menu' && texto === '6') {
+      await enviarMensaje(telefono,
+        '🛒 *¿QUÉ ES DESPENSACLUB FAMILIAR?*\n\n' +
+        'Somos una comunidad familiar de consumo inteligente. Cada mes juntamos a varias familias para conseguir despensas a mejor precio, y cada quien recoge la suya.\n\n' +
+        '✅ *No es un fraude ni una pirámide financiera.* No prometemos hacerte rico, no manejamos inversiones ni rendimientos de dinero. Es un club de consumo real: pagas por una despensa real que recibes cada mes.\n\n' +
+        '🔍 *¿Por qué te llegó por invitación?*\n' +
+        'Porque alguien de tu confianza (un amigo o familiar) ya forma parte del club y quiso compartirte el beneficio. Así crece: de boca en boca, entre gente conocida.\n\n' +
+        '⚙️ *¿Cómo funciona?*\n' +
+        '1️⃣ Pagas tu membresía una vez al año: $50 pesos\n' +
+        '2️⃣ Cada mes pagas y recoges tu despensa: $250 pesos\n' +
+        '3️⃣ Si invitas a otras personas que también consuman, ganas una pequeña comisión por cada despensa mensual que ellas recojan\n\n' +
+        '🎥 *Videos explicativos (ejemplos del modelo, mientras preparamos el nuestro):*\n' +
+        'https://youtu.be/5QV5XiR_e7I\n' +
+        'https://youtu.be/tkd8s_HcTJY\n' +
+        'https://youtu.be/-CQCqb45UOk\n\n' +
+        '¿Listo para registrarte? Escribe *MENU* y elige la opción 1.'
+      );
       return;
     }
 
@@ -1441,8 +1622,8 @@ async function procesarMensaje(telefono, mensaje) {
 
         // Verificar espacio disponible en el nuevo patrocinador
         const refCount = nuevoPatrocinador.referidos ? nuevoPatrocinador.referidos.length : 0;
-        if (refCount >= 4) {
-          await enviarMensaje(telefono, '❌ ' + idNuevoPatrocinador + ' ya tiene sus 4 lugares ocupados.');
+        if (refCount >= limiteReferidos(nuevoPatrocinador.id)) {
+          await enviarMensaje(telefono, '❌ ' + idNuevoPatrocinador + ' ya tiene sus lugares ocupados.');
           return;
         }
 
@@ -1576,72 +1757,9 @@ async function procesarMensaje(telefono, mensaje) {
 
       if (texto.startsWith('CONFIRMAR ')) {
         const idU = texto.replace('CONFIRMAR ', '').trim().toUpperCase();
-        const userU = await Usuario.findOne({ id: idU });
-        if (!userU) { await enviarMensaje(telefono, '❌ No encontré el usuario ' + idU); return; }
-        const pagoIdx = userU.pagos.findLastIndex(function(p) { return p.estado === 'pendiente'; });
-        if (pagoIdx === -1) { await enviarMensaje(telefono, '❌ No hay pagos pendientes para ' + idU); return; }
-        userU.pagos[pagoIdx].estado = 'confirmado';
-
-        // Reactivar si estaba congelado
-        const estabaCongelado = userU.congelado || !userU.activo;
-        userU.congelado = false;
-        userU.activo = true;
-
-        // Si es membresía, actualizar vigencia
-        if (userU.pagos[pagoIdx].concepto === 'Membresía anual') {
-          const nuevaVigencia = new Date();
-          nuevaVigencia.setFullYear(nuevaVigencia.getFullYear() + 1);
-          userU.vigencia = nuevaVigencia;
-        }
-
-        await userU.save();
-        const pago = userU.pagos[pagoIdx];
-
-        // Si es despensa mensual: registrar consumo y comisión al patrocinador directo
-        let avisoComision = '';
-        let avisoActividadInusual = '';
-        if (pago.concepto === 'Despensa mensual') {
-          // Antifraude: detectar si ya tuvo un consumo de despensa este mismo mes
-          const ahora = new Date();
-          const consumosEsteMes = (userU.consumos || []).filter(c => {
-            const fc = new Date(c.fecha);
-            return c.descripcion === 'Despensa mensual' &&
-                   fc.getMonth() === ahora.getMonth() &&
-                   fc.getFullYear() === ahora.getFullYear();
-          });
-          if (consumosEsteMes.length >= 1) {
-            avisoActividadInusual = '\n\n🚨 *ACTIVIDAD INUSUAL*: ' + userU.nombre + ' (' + userU.id + ') ya registró ' + consumosEsteMes.length + ' consumo(s) de despensa este mes. Verifica que no sea un error o doble cobro.';
-            await enviarMensaje('5215585567250', avisoActividadInusual.trim());
-          }
-
-          await Usuario.updateOne(
-            { id: userU.id },
-            { $push: { consumos: { fecha: new Date(), descripcion: 'Despensa mensual' } } }
-          );
-
-          if (userU.referidoPor) {
-            const patrocinador = await Usuario.findOne({ id: userU.referidoPor });
-            if (patrocinador) {
-              await Usuario.updateOne(
-                { id: patrocinador.id },
-                { $push: { comisiones: {
-                  monto: CONFIG_PRECIOS.comisionReferido,
-                  deUsuario: userU.id,
-                  deNombre: userU.nombre,
-                  fecha: new Date(),
-                  pagada: false
-                }}}
-              );
-              await enviarMensaje(patrocinador.telefono,
-                '💰 *COMISIÓN GENERADA*\n\n' +
-                'Tu referido *' + userU.nombre + '* (' + userU.id + ') confirmó su pago de despensa.\n\n' +
-                '🎁 Comisión: *$' + CONFIG_PRECIOS.comisionReferido + ' pesos*\n\n' +
-                'Escribe *MIS COMISIONES* para ver tu total acumulado.'
-              );
-              avisoComision = '\n💰 Comisión de $' + CONFIG_PRECIOS.comisionReferido + ' generada para ' + patrocinador.id;
-            }
-          }
-        }
+        const resultado = await confirmarPagoPendiente(idU);
+        if (!resultado.ok) { await enviarMensaje(telefono, '❌ ' + resultado.motivo); return; }
+        const { userU, pago, estabaCongelado, avisoComision } = resultado;
 
         await enviarMensaje(telefono,
           '✅ *PAGO CONFIRMADO*\n\n' +
@@ -1649,30 +1767,8 @@ async function procesarMensaje(telefono, mensaje) {
           '🪪 ' + idU + '\n' +
           '💵 ' + pago.concepto + ' — $' + pago.monto + ' pesos' +
           (estabaCongelado ? '\n\n❄️➡️✅ Cuenta reactivada automáticamente.' : '') +
-          avisoComision
+          (avisoComision ? '\n💰 ' + avisoComision : '')
         );
-
-        await enviarMensaje(userU.telefono,
-          '✅ *TU PAGO FUE CONFIRMADO*\n\n' +
-          'Hola *' + userU.nombre + '*\n\n' +
-          '💵 Concepto: ' + pago.concepto + '\n' +
-          '💵 Monto: $' + pago.monto + ' pesos\n' +
-          '📅 Fecha: ' + new Date().toLocaleDateString('es-MX') +
-          (pago.concepto === 'Membresía anual' ? '\n⏳ Vigencia: ' + new Date(userU.vigencia).toLocaleDateString('es-MX') : '') +
-          (estabaCongelado ? '\n\n🎉 *Tu cuenta ha sido reactivada.*\nYa puedes disfrutar de todos los beneficios.' : '') +
-          '\n\n¡Gracias por tu pago! 🛒'
-        );
-
-        // Notificar al patrocinador si se reactivó
-        if (estabaCongelado && userU.referidoPor) {
-          const patrocinador = await Usuario.findOne({ id: userU.referidoPor });
-          if (patrocinador) {
-            await enviarMensaje(patrocinador.telefono,
-              '✅ *Tu referido se reactivó*\n\n' +
-              '*' + userU.nombre + '* (' + userU.id + ') regularizó su pago y su cuenta está activa nuevamente.'
-            );
-          }
-        }
         return;
       }
 
@@ -1894,7 +1990,8 @@ app.get('/credencial/:id', async function(req, res) {
     const color = COLORES_HEX[usuario.nivel || 0] || COLORES_HEX[0];
     const fechaReg = new Date(usuario.fechaRegistro).toLocaleDateString('es-MX');
     const vigencia = usuario.vigencia ? new Date(usuario.vigencia).toLocaleDateString('es-MX') : 'N/A';
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${usuario.id}&color=${color.bg.replace('#','')}`;
+    const qrData = encodeURIComponent('https://despensas-bot-production.up.railway.app/admin/escanear/' + usuario.id + '?key=abb46f223b7cec4e6e3781421d2d1cd5');
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${qrData}&color=${color.bg.replace('#','')}`;
 
     res.send(`<!DOCTYPE html>
 <html>
@@ -2973,6 +3070,56 @@ app.get('/portal', async function(req, res) {
 </html>`);
   } catch (err) {
     res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// ============================================================
+// ESCANEO DE CREDENCIAL EN SUCURSAL — confirma pago en efectivo pendiente
+// ============================================================
+app.get('/admin/escanear/:id', async function(req, res) {
+  if (req.query.key !== 'abb46f223b7cec4e6e3781421d2d1cd5') {
+    return res.status(403).send('Acceso denegado');
+  }
+  const idU = req.params.id.toUpperCase();
+
+  function pantalla(titulo, color, mensaje) {
+    res.send(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:sans-serif;background:#1a1a2e;color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+  .card{background:${color};border-radius:18px;padding:30px 24px;max-width:360px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.4)}
+  h1{font-size:22px;margin-bottom:14px}
+  p{font-size:15px;line-height:1.5}
+  .btn{display:inline-block;margin-top:20px;padding:10px 24px;background:rgba(255,255,255,0.25);border-radius:10px;color:#fff;text-decoration:none;font-weight:bold;font-size:14px}
+</style></head>
+<body><div class="card"><h1>${titulo}</h1><p>${mensaje}</p>
+<a class="btn" href="/admin/usuario/${idU}?key=abb46f223b7cec4e6e3781421d2d1cd5">Ver expediente</a>
+</div></body></html>`);
+  }
+
+  try {
+    const userU = await Usuario.findOne({ id: idU }).lean();
+    if (!userU) return pantalla('❌ No encontrado', '#B71C1C', 'No existe el usuario ' + idU);
+
+    const pagoPendiente = (userU.pagos || []).slice().reverse().find(p => p.estado === 'pendiente');
+    if (!pagoPendiente) {
+      return pantalla('ℹ️ Sin pagos pendientes', '#555', userU.nombre + ' (' + idU + ') no tiene ningún pago pendiente de confirmar en este momento.');
+    }
+
+    const resultado = await confirmarPagoPendiente(idU);
+    if (!resultado.ok) {
+      return pantalla('❌ Error', '#B71C1C', resultado.motivo);
+    }
+
+    return pantalla('✅ Pago confirmado',
+      '#2E7D32',
+      resultado.userU.nombre + '<br>' + idU + '<br><br>' +
+      resultado.pago.concepto + ' — $' + resultado.pago.monto + ' pesos' +
+      (resultado.estabaCongelado ? '<br><br>❄️➡️✅ Cuenta reactivada' : '')
+    );
+  } catch (err) {
+    return pantalla('❌ Error', '#B71C1C', err.message);
   }
 });
 
