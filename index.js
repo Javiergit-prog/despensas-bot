@@ -108,9 +108,12 @@ const CONFIG_PRECIOS = {
 const QR_CODI_URL = 'https://github.com/Javiergit-prog/despensas-bot/blob/main/QR%20Banamex.jpeg?raw=true';
 
 const COLORES_NIVEL = {
-  0: 'VIOLETA', 1: 'DORADO', 2: 'AZUL',
-  3: 'NARANJA', 4: 'ROSA', 5: 'VERDE',
-  6: 'AMARILLO', 7: 'TURQUESA', 8: 'VERDE BANDERA', 9: 'GRIS'
+  0: 'VIOLETA',      1: 'DORADO',       2: 'AZUL',
+  3: 'NARANJA',      4: 'ROSA',         5: 'VERDE',
+  6: 'AMARILLO',     7: 'TURQUESA',     8: 'VERDE BANDERA', 9: 'GRIS',
+  10: 'ROJO',        11: 'CELESTE',     12: 'MAGENTA',
+  13: 'LIMA',        14: 'CORAL',       15: 'ÍNDIGO',
+  16: 'MENTA',       17: 'BRONCE',      18: 'LAVANDA',      19: 'ESMERALDA'
 };
 
 // ============================================================
@@ -133,6 +136,43 @@ function generarID(contador) {
 // ============================================================
 function limiteReferidos(idUsuario) {
   return idUsuario === 'DESP-000110' ? 1 : 4;
+}
+
+// ============================================================
+// SISTEMA "2-UP SPLIT" — quién recibe la comisión de cada usuario
+// ============================================================
+// Para cualquier usuario, su comisión mensual de despensa NO siempre
+// va a quien lo invitó directamente. Depende de su POSICIÓN DE REGISTRO
+// (1°, 2°, 3° o 4°) entre los referidos de su patrocinador:
+//
+//   Posición 1 o 2  → la comisión sube al patrocinador DE SU PATROCINADOR
+//                      (el "padre financiero", un nivel más arriba)
+//   Posición 3 o 4  → la comisión se queda con su patrocinador directo
+//
+// Caso especial: si el usuario que debería recibirla no existe (porque
+// estamos en la raíz DESP-000110, que no tiene patrocinador propio),
+// la comisión la absorbe DESP-000110 — no se pierde, no sube más allá.
+// ============================================================
+async function obtenerPadreFinanciero(idUsuarioQueConsume) {
+  const usuario = await Usuario.findOne({ id: idUsuarioQueConsume }, 'id referidoPor').lean();
+  if (!usuario || !usuario.referidoPor) return null; // No tiene patrocinador (es la raíz misma)
+
+  const patrocinador = await Usuario.findOne({ id: usuario.referidoPor }, 'id referidoPor referidos').lean();
+  if (!patrocinador) return null;
+
+  // Posición de este usuario dentro de los referidos de su patrocinador (orden de registro)
+  const posicion = (patrocinador.referidos || []).indexOf(idUsuarioQueConsume); // 0-indexado
+
+  // Posición 0 o 1 (1° o 2° invitado) → HEREDA el padre financiero de su propio patrocinador
+  // (recursivo: si el patrocinador también era 1° o 2°, sigue subiendo en cadena)
+  if (posicion === 0 || posicion === 1) {
+    const padreFinancieroDelPatrocinador = await obtenerPadreFinanciero(patrocinador.id);
+    // Si el patrocinador no tiene padre financiero propio (es la raíz), la raíz se la queda
+    return padreFinancieroDelPatrocinador || patrocinador.id;
+  }
+
+  // Posición 2 o 3 (3° o 4° invitado) → se queda con el patrocinador directo
+  return patrocinador.id;
 }
 
 async function buscarPosicionDisponible() {
@@ -793,10 +833,15 @@ async function confirmarPagoPendiente(idU) {
     );
 
     if (userU.referidoPor) {
-      const patrocinador = await Usuario.findOne({ id: userU.referidoPor });
-      if (patrocinador) {
+      // Sistema 2-Up Split: determina quién realmente recibe la comisión
+      // (el patrocinador directo, o el "padre financiero" un nivel más arriba,
+      // según la posición de registro de userU entre los referidos de su patrocinador)
+      const idBeneficiario = await obtenerPadreFinanciero(userU.id);
+      const beneficiario = idBeneficiario ? await Usuario.findOne({ id: idBeneficiario }) : null;
+
+      if (beneficiario) {
         await Usuario.updateOne(
-          { id: patrocinador.id },
+          { id: beneficiario.id },
           { $push: { comisiones: {
             monto: CONFIG_PRECIOS.comisionReferido,
             deUsuario: userU.id,
@@ -805,13 +850,13 @@ async function confirmarPagoPendiente(idU) {
             pagada: false
           }}}
         );
-        await enviarMensaje(patrocinador.telefono,
+        await enviarMensaje(beneficiario.telefono,
           '💰 *COMISIÓN GENERADA*\n\n' +
-          'Tu referido *' + userU.nombre + '* (' + userU.id + ') confirmó su pago de despensa.\n\n' +
+          'Tu red *' + userU.nombre + '* (' + userU.id + ') confirmó su pago de despensa.\n\n' +
           '🎁 Comisión: *$' + CONFIG_PRECIOS.comisionReferido + ' pesos*\n\n' +
           'Escribe *MIS COMISIONES* para ver tu total acumulado.'
         );
-        avisoComision = 'Comisión de $' + CONFIG_PRECIOS.comisionReferido + ' generada para ' + patrocinador.id;
+        avisoComision = 'Comisión de $' + CONFIG_PRECIOS.comisionReferido + ' generada para ' + beneficiario.id;
       }
     }
   }
@@ -994,6 +1039,13 @@ async function procesarMensaje(telefono, mensaje) {
             'El usuario con ese codigo ya completo sus lugares disponibles.\n\n' +
             'Contacta al administrador para mas informacion:\n' +
             'https://wa.me/525576683884?text=Hola%20necesito%20ayuda%20con%20un%20registro'
+          );
+          // Alertar al admin: alguien quiso ser el 5to invitado de un usuario ya lleno
+          await enviarMensaje('5215585567250',
+            '🚨 *EXCEDENTE DE REFERIDOS*\n\n' +
+            'Alguien intentó registrarse con el código de *' + referidor.id + '* (' + referidor.nombre + '), pero ya tiene sus ' + limiteReferidos(referidor.id) + ' lugar(es) ocupados.\n\n' +
+            '📱 Teléfono del interesado: +' + telLimpio + '\n\n' +
+            'Decide manualmente dónde colocarlo y usa:\n*REASIGNAR <su-ID> <nuevo-patrocinador>*\n(primero pídele que complete su registro con código *NO* para que se le asigne un lugar temporal)'
           );
           return;
         }
@@ -1512,6 +1564,78 @@ async function procesarMensaje(telefono, mensaje) {
 
     if (esAdmin) {
 
+      // ── CAMBIAR TELEFONO: para clientes que perdieron o cambiaron su celular
+      if (texto.startsWith('CAMBIAR TELEFONO ')) {
+        const partes = texto.replace('CAMBIAR TELEFONO ', '').trim().split(' ');
+        if (partes.length !== 2) {
+          await enviarMensaje(telefono, '❌ Formato: *CAMBIAR TELEFONO DESP-000XXX 5512345678*\n(10 dígitos, sin espacios ni guiones)');
+          return;
+        }
+        const [idCambiar, telNuevo] = partes;
+        const telNuevoLimpio = telNuevo.replace(/\D/g, '');
+        if (telNuevoLimpio.length !== 10) {
+          await enviarMensaje(telefono, '❌ El teléfono debe tener exactamente 10 dígitos. Recibí: ' + telNuevo);
+          return;
+        }
+
+        const userCambiar = await Usuario.findOne({ id: idCambiar.toUpperCase() });
+        if (!userCambiar) { await enviarMensaje(telefono, '❌ No encontré el usuario ' + idCambiar); return; }
+
+        const telefonoAnterior = userCambiar.telefono;
+        const yaExiste = await Usuario.findOne({ telefonoLimpio: telNuevoLimpio });
+        if (yaExiste && yaExiste.id !== userCambiar.id) {
+          await enviarMensaje(telefono, '❌ Ese número ya está registrado con la cuenta ' + yaExiste.id + ' (' + yaExiste.nombre + ').');
+          return;
+        }
+
+        userCambiar.telefono = '521' + telNuevoLimpio;
+        userCambiar.telefonoLimpio = telNuevoLimpio;
+        await userCambiar.save();
+
+        await enviarMensaje(telefono,
+          '✅ *TELÉFONO ACTUALIZADO*\n\n' +
+          '👤 ' + userCambiar.nombre + ' (' + idCambiar.toUpperCase() + ')\n' +
+          '📱 Anterior: ' + telefonoAnterior + '\n' +
+          '📱 Nuevo: 521' + telNuevoLimpio
+        );
+
+        // Avisar al cliente desde su número nuevo
+        await enviarMensaje('521' + telNuevoLimpio,
+          '👋 Hola *' + userCambiar.nombre + '*\n\n' +
+          'Tu número de contacto en DespensaClub Familiar fue actualizado correctamente a este WhatsApp.\n\n' +
+          'Escribe *MENU* para ver tus opciones.'
+        );
+        return;
+      }
+
+      // ── AVISO: mensaje masivo a todos los usuarios activos (mantenimiento, precios, avisos generales)
+      if (texto.startsWith('AVISO ')) {
+        const mensajeAviso = mensaje.replace(/^AVISO /i, '').trim();
+        if (!mensajeAviso) {
+          await enviarMensaje(telefono, '❌ Escribe el mensaje después de AVISO. Ejemplo:\n*AVISO Mañana el sistema estará en mantenimiento de 2 a 4 PM.*');
+          return;
+        }
+
+        const todosActivos = await Usuario.find({ activo: true }, 'telefono nombre').lean();
+        await enviarMensaje(telefono, '📢 Enviando aviso a ' + todosActivos.length + ' usuario(s) activo(s)...');
+
+        let enviados = 0;
+        for (const dest of todosActivos) {
+          try {
+            await enviarMensaje(dest.telefono,
+              '📢 *AVISO DE DESPENSACLUB FAMILIAR*\n\n' + mensajeAviso
+            );
+            enviados++;
+            await new Promise(r => setTimeout(r, 300)); // pequeña pausa entre envíos
+          } catch (e) {
+            // continúa aunque falle uno
+          }
+        }
+
+        await enviarMensaje(telefono, '✅ Aviso enviado a ' + enviados + ' de ' + todosActivos.length + ' usuarios.');
+        return;
+      }
+
       if (texto === 'REPORTE MENSUAL' || texto === 'REPORTEMENSUAL') {
         await enviarMensaje(telefono, '📊 Generando reporte mensual...');
         await enviarReporteMensual();
@@ -1984,7 +2108,17 @@ app.get('/credencial/:id', async function(req, res) {
       6: { bg: '#FFC107', text: '#000', nombre: 'AMARILLO' },
       7: { bg: '#00BCD4', text: '#000', nombre: 'TURQUESA' },
       8: { bg: '#1B5E20', text: '#fff', nombre: 'VERDE BANDERA' },
-      9: { bg: '#9E9E9E', text: '#fff', nombre: 'GRIS' }
+      9: { bg: '#9E9E9E', text: '#fff', nombre: 'GRIS' },
+      10: { bg: '#F44336', text: '#fff', nombre: 'ROJO' },
+      11: { bg: '#03A9F4', text: '#fff', nombre: 'CELESTE' },
+      12: { bg: '#9C27B0', text: '#fff', nombre: 'MAGENTA' },
+      13: { bg: '#8BC34A', text: '#000', nombre: 'LIMA' },
+      14: { bg: '#FF7043', text: '#fff', nombre: 'CORAL' },
+      15: { bg: '#3F51B5', text: '#fff', nombre: 'ÍNDIGO' },
+      16: { bg: '#009688', text: '#fff', nombre: 'MENTA' },
+      17: { bg: '#795548', text: '#fff', nombre: 'BRONCE' },
+      18: { bg: '#CE93D8', text: '#000', nombre: 'LAVANDA' },
+      19: { bg: '#00897B', text: '#fff', nombre: 'ESMERALDA' }
     };
 
     const color = COLORES_HEX[usuario.nivel || 0] || COLORES_HEX[0];
@@ -2123,7 +2257,9 @@ app.get('/admin/usuarios', async function(req, res) {
     const COLORES_HEX = {
       0: '#7B2FBE', 1: '#F5A623', 2: '#2196F3', 3: '#FF6B2B',
       4: '#E91E8C', 5: '#4CAF50', 6: '#FFC107', 7: '#00BCD4',
-      8: '#1B5E20', 9: '#9E9E9E'
+      8: '#1B5E20', 9: '#9E9E9E', 10: '#F44336', 11: '#03A9F4',
+      12: '#9C27B0', 13: '#8BC34A', 14: '#FF7043', 15: '#3F51B5',
+      16: '#009688', 17: '#795548', 18: '#CE93D8', 19: '#00897B'
     };
 
     res.send(`<!DOCTYPE html>
@@ -2245,7 +2381,9 @@ app.get('/admin/usuario/:id', async function(req, res) {
     const COLORES_HEX = {
       0: '#7B2FBE', 1: '#F5A623', 2: '#2196F3', 3: '#FF6B2B',
       4: '#E91E8C', 5: '#4CAF50', 6: '#FFC107', 7: '#00BCD4',
-      8: '#1B5E20', 9: '#9E9E9E'
+      8: '#1B5E20', 9: '#9E9E9E', 10: '#F44336', 11: '#03A9F4',
+      12: '#9C27B0', 13: '#8BC34A', 14: '#FF7043', 15: '#3F51B5',
+      16: '#009688', 17: '#795548', 18: '#CE93D8', 19: '#00897B'
     };
     const color = COLORES_HEX[u.nivel || 0] || '#7B2FBE';
     const vigenciaStr = u.vigencia ? new Date(u.vigencia).toLocaleDateString('es-MX') : 'N/A';
@@ -2774,7 +2912,17 @@ app.get('/admin/arbol', async function(req, res) {
       6: { bg: '#FFC107', text: '#000', nombre: 'AMARILLO' },
       7: { bg: '#00BCD4', text: '#000', nombre: 'TURQUESA' },
       8: { bg: '#1B5E20', text: '#fff', nombre: 'VERDE BANDERA' },
-      9: { bg: '#9E9E9E', text: '#fff', nombre: 'GRIS' }
+      9: { bg: '#9E9E9E', text: '#fff', nombre: 'GRIS' },
+      10: { bg: '#F44336', text: '#fff', nombre: 'ROJO' },
+      11: { bg: '#03A9F4', text: '#fff', nombre: 'CELESTE' },
+      12: { bg: '#9C27B0', text: '#fff', nombre: 'MAGENTA' },
+      13: { bg: '#8BC34A', text: '#000', nombre: 'LIMA' },
+      14: { bg: '#FF7043', text: '#fff', nombre: 'CORAL' },
+      15: { bg: '#3F51B5', text: '#fff', nombre: 'ÍNDIGO' },
+      16: { bg: '#009688', text: '#fff', nombre: 'MENTA' },
+      17: { bg: '#795548', text: '#fff', nombre: 'BRONCE' },
+      18: { bg: '#CE93D8', text: '#000', nombre: 'LAVANDA' },
+      19: { bg: '#00897B', text: '#fff', nombre: 'ESMERALDA' }
     };
 
     function buildNodo(usuario, todos) {
@@ -2918,11 +3066,15 @@ app.get('/portal', async function(req, res) {
     const COLORES_HEX = {
       0: '#7B2FBE', 1: '#F5A623', 2: '#2196F3', 3: '#FF6B2B',
       4: '#E91E8C', 5: '#4CAF50', 6: '#FFC107', 7: '#00BCD4',
-      8: '#1B5E20', 9: '#9E9E9E'
+      8: '#1B5E20', 9: '#9E9E9E', 10: '#F44336', 11: '#03A9F4',
+      12: '#9C27B0', 13: '#8BC34A', 14: '#FF7043', 15: '#3F51B5',
+      16: '#009688', 17: '#795548', 18: '#CE93D8', 19: '#00897B'
     };
     const COLORES_NOMBRE = {
       0: 'VIOLETA', 1: 'DORADO', 2: 'AZUL', 3: 'NARANJA', 4: 'ROSA',
-      5: 'VERDE', 6: 'AMARILLO', 7: 'TURQUESA', 8: 'VERDE BANDERA', 9: 'GRIS'
+      5: 'VERDE', 6: 'AMARILLO', 7: 'TURQUESA', 8: 'VERDE BANDERA', 9: 'GRIS',
+      10: 'ROJO', 11: 'CELESTE', 12: 'MAGENTA', 13: 'LIMA', 14: 'CORAL',
+      15: 'ÍNDIGO', 16: 'MENTA', 17: 'BRONCE', 18: 'LAVANDA', 19: 'ESMERALDA'
     };
     const color = COLORES_HEX[u.nivel || 0] || '#7B2FBE';
     const vigenciaStr = u.vigencia ? new Date(u.vigencia).toLocaleDateString('es-MX') : 'N/A';
